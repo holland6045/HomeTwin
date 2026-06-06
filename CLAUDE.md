@@ -81,6 +81,20 @@ Use `build_flags` in `platformio.ini` to compile platform-specific code paths ra
 ### LED Pipeline
 The LED state is computed centrally (on ESP32 or the coordinating MCU) and pushed to LED drivers. Animations run as state machines, not blocking delays. Never call `delay()` in LED or sensor code.
 
+`lib/RGBController/` abstracts over three supported protocols behind a common `ILEDDriver` interface. Select the active driver at compile time via a build flag in `platformio.ini`:
+
+| Protocol | Flag | Library | Notes |
+|---|---|---|---|
+| WS2812B / NeoPixel | `-D LED_DRIVER=WS2812B` | FastLED | Single-wire, 3-channel RGB |
+| SK6812 / RGBW | `-D LED_DRIVER=SK6812` | FastLED | Single-wire, 4-channel RGBW |
+| PWM RGB strip | `-D LED_DRIVER=PWM_RGB` | platform ledc / analogWrite | Non-addressable, 3 PWM channels |
+
+Rules for all driver implementations:
+- Never write to LED hardware outside of `ILEDDriver::show()` — callers only touch the pixel buffer.
+- PWM_RGB maps the buffer's first pixel to the three PWM channels; treat it as a single-zone driver.
+- RGBW content: pass a white component explicitly; do not auto-derive white from RGB values.
+- FastLED's `addLeds<>` call and the PWM channel setup both live in the concrete driver constructor — nowhere else.
+
 ### Shared Libraries
 Code in `lib/` must compile cleanly on all target platforms unless guarded by a platform check in `platformio.ini`. Prefer pure C++ with no platform assumptions in library headers.
 
