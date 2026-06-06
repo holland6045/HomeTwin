@@ -124,6 +124,50 @@ Rules for all driver implementations:
 - RGB parallel and LED matrix drivers must not be linked on RP2040 or AVR targets — guard with platform checks in `platformio.ini`.
 - Each display node declares exactly one `DISPLAY` flag and at most one `TOUCH` flag; no runtime switching.
 
+### Sensor Framework
+
+`lib/SensorBus/` owns all sensor integration. Every sensor implements `ISensor` and is registered with `SensorBus`, which drives polling, owns the reading schedule, and forwards data to the ESP32 coordinator via `DeskProtocol`.
+
+**Supported sensor categories**
+
+| Category | Example ICs | Bus |
+|---|---|---|
+| Air quality / CO2 | SCD40, SGP30, CCS811, MH-Z19B | I2C / UART |
+| Temperature / humidity | BME280, SHT31, DHT22, DS18B20 | I2C / 1-Wire |
+| Presence / proximity | LD2410 (mmWave), HC-SR04 (ultrasonic), PIR | UART / GPIO |
+| Ambient light | BH1750, VEML7700, TSL2591 | I2C |
+| Power / current | INA219, INA226 | I2C |
+| IMU / accelerometer | MPU6050, LSM6DS3 | I2C / SPI |
+| Capacitive touch | MPR121, TTP223 | I2C / GPIO |
+| Microphone / sound | INMP441, MAX4466 | I2S / ADC |
+
+**Bus protocol rules**
+
+| Bus | Rule |
+|---|---|
+| I2C | All devices on a shared bus must have unique addresses; document address jumpers in hardware notes. Use interrupt pin where available — do not busy-poll. |
+| SPI | One CS pin per sensor; never share CS lines. |
+| UART | Each UART sensor gets its own `UARTSensor` wrapper that owns the serial port and parses the device-specific framing. |
+| 1-Wire | DS18B20 chains attach to a single GPIO; the driver resolves ROM codes at init and maps them to named sensor slots. |
+| ADC | Always oversample (minimum 16×) and apply a moving average before publishing. Raw ADC values must never leave the driver. |
+| I2S | I2S microphone data is processed in DMA callbacks only; do not copy I2S buffers to heap in an ISR. |
+
+**`ISensor` interface contract**
+
+```cpp
+class ISensor {
+public:
+    virtual bool     init()   = 0;   // called once at boot; return false to mark offline
+    virtual void     update() = 0;   // called by SensorBus on its tick; must be non-blocking
+    virtual Reading  read()   = 0;   // returns latest cached value; never triggers I/O
+};
+```
+
+- `update()` must return in < 1 ms; defer slow operations (UART reads, I2S processing) to a background task or state machine.
+- `SensorBus` assigns each sensor a poll interval via `registerSensor(sensor, intervalMs)`. Sensors with different rates (e.g. CO2 every 5 s, IMU every 10 ms) are handled by the scheduler — do not implement your own timing inside `update()`.
+- Offline sensors (init returns false) are retried on a 30 s back-off; they must not block the bus loop.
+- All `Reading` values carry a timestamp (`uint32_t ms`) and a validity flag; consumers must check validity before use.
+
 ### Shared Libraries
 Code in `lib/` must compile cleanly on all target platforms unless guarded by a platform check in `platformio.ini`. Prefer pure C++ with no platform assumptions in library headers.
 
