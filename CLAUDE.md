@@ -91,6 +91,12 @@ The system must degrade gracefully when any MCU node disconnects and resume auto
 - Nodes announce their capabilities (sensor types, LED zones, display role) in a registration packet on boot. The coordinator builds its device map at runtime — never hardcode which nodes exist or what they provide.
 - A new node type must be addable without modifying firmware on any existing node.
 
+**State history & catch-up:**
+- The coordinator maintains a fixed-depth ring buffer of timestamped state snapshots per node (size configurable via build flag, default 32 entries). Entries cover sensor `Reading` values, LED zone states, and any config deltas.
+- On reconnect, the node sends its last-known timestamp in the registration packet. The coordinator replays buffered entries newer than that timestamp in chronological order before resuming live data.
+- Buffer depth is bounded — overflow discards oldest entries. Nodes that reconnect after a gap larger than the buffer window receive only the most recent snapshot and a `STALE` flag; they must not assume continuity.
+- Buffers are allocated statically per node slot at startup. No heap growth on reconnect.
+
 **Safe defaults:**
 - On node loss, actuators (LEDs, display) hold their last committed state. Sensors drop to `Reading::invalid`; consumers that check the validity flag degrade silently.
 - No subsystem may assert or halt because a peer node is absent. Fail-safe, not fail-stop.
