@@ -79,6 +79,37 @@ Rules:
 - Adding a new sensor, display, or LED driver must not increase binary size on any environment that does not set its flag.
 - The `native` test environment is the proof: it compiles all shared `lib/` code with no hardware flags set and no hardware libraries installed. If `pio test -e native` breaks when a new driver is added, the driver violated the isolation rule.
 
+### Network Topology
+The system supports a two-tier hierarchy: one primary coordinator (ESP32) and any number of **hub nodes** that each manage a local cluster of leaf nodes. Direct leaf-to-coordinator connections are allowed but not required.
+
+```
+ESP32 coordinator
+├── Hub A  (e.g. RP2040 — left desk zone)
+│   ├── Leaf: LED driver
+│   ├── Leaf: sensor array
+│   └── Leaf: AVR peripheral node
+├── Hub B  (e.g. ESP32 — right desk zone, wireless via ESP-NOW)
+│   ├── Leaf: display node
+│   └── Leaf: touch controller
+└── Direct leaf: STM32 motor controller
+```
+
+**Hub responsibilities:**
+- Runs the same heartbeat and discovery logic as the coordinator for its own leaf nodes.
+- Maintains its own per-leaf state ring buffer; leaf catch-up is handled locally without coordinator involvement.
+- Aggregates and forwards leaf data upstream using the standard `DeskProtocol` packet format — the coordinator sees hub-sourced data as normal node readings with a `hub_id` routing field.
+- May execute local control loops (e.g. LED zone animation, sensor threshold alerts) without round-tripping to the coordinator, reducing latency and bus load.
+
+**Coordinator rules:**
+- Treats a hub as a single addressable node; does not need to know the topology beneath it.
+- If a hub disconnects, all of its leaves are implicitly marked offline — the coordinator does not attempt to contact them directly.
+- A hub may be promoted to direct-connect or demoted back to hub role via a runtime config packet; no firmware reflash required.
+
+**Transport flexibility:**
+- Hub ↔ coordinator link: UART, I2C, SPI, or ESP-NOW (wireless hubs).
+- Hub ↔ leaf link: any supported bus; the hub owns all bus-master responsibilities for its cluster.
+- Routing field in `DeskProtocol` packets: `coordinator_id / hub_id / node_id` — three bytes, zero for unused tiers.
+
 ### Node Resilience
 The system must degrade gracefully when any MCU node disconnects and resume automatically when it reconnects or a new node joins — no coordinator firmware change required.
 
