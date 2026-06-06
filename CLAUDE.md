@@ -79,6 +79,22 @@ Rules:
 - Adding a new sensor, display, or LED driver must not increase binary size on any environment that does not set its flag.
 - The `native` test environment is the proof: it compiles all shared `lib/` code with no hardware flags set and no hardware libraries installed. If `pio test -e native` breaks when a new driver is added, the driver violated the isolation rule.
 
+### Node Resilience
+The system must degrade gracefully when any MCU node disconnects and resume automatically when it reconnects or a new node joins — no coordinator firmware change required.
+
+**Liveness:**
+- Every node sends a periodic heartbeat packet over `DeskProtocol`. The ESP32 coordinator marks a node offline after a configurable missed-heartbeat threshold (default: 3 consecutive missed beats).
+- Offline nodes do not block any coordinator loop, sensor poll, or LED update. The coordinator continues operating on the last valid state for that node.
+- When a node reconnects it re-announces itself; the coordinator re-registers it without restart.
+
+**Discovery:**
+- Nodes announce their capabilities (sensor types, LED zones, display role) in a registration packet on boot. The coordinator builds its device map at runtime — never hardcode which nodes exist or what they provide.
+- A new node type must be addable without modifying firmware on any existing node.
+
+**Safe defaults:**
+- On node loss, actuators (LEDs, display) hold their last committed state. Sensors drop to `Reading::invalid`; consumers that check the validity flag degrade silently.
+- No subsystem may assert or halt because a peer node is absent. Fail-safe, not fail-stop.
+
 ### Hardware Abstraction Layer (HAL)
 All hardware-specific code lives behind interfaces defined in `include/`. Concrete implementations go in `lib/`. Tests use mock implementations. Never call platform-specific APIs (e.g., `digitalWrite`, `gpio_set_level`) directly in business logic — wrap them.
 
