@@ -185,6 +185,22 @@ Each environment in `platformio.ini` follows this naming convention:
 
 The `native` environment is used exclusively for unit tests and must not depend on any hardware library.
 
+## Language Strategy
+
+**Primary: C++17** across all four MCU targets. AVR caps at C++14 — avoid C++17+ features in any `lib/` shared code; restrict them to ESP32/RP2040/STM32-specific implementations. Global PlatformIO flags: `-fno-rtti -fno-exceptions`. Heap allocation allowed on ESP32/RP2040; avoid in AVR and ISR contexts.
+
+**Approved split: C++ firmware + Python/TypeScript for host-side tooling and companion app.** PlatformIO is Python-native; OTA scripts, config generators, and sensor dashboards belong there. If a companion app is built, TypeScript (web) or Python are preferred. Protocol serialization shared between firmware and host must be defined once (e.g. via a schema or codegen) — never duplicated by hand.
+
+**Rejected splits and why:**
+
+| Mix | Reason rejected |
+|---|---|
+| MicroPython on ESP32 | FastLED, LVGL, sensor libs unavailable; breaks shared `lib/` |
+| Rust on RP2040 now | `embassy-rp` ecosystem immature; RP2040 becomes an isolated island |
+| C++ firmware + C for STM32 HAL | STM32 HAL is C but wraps cleanly in C++ — no reason to split |
+
+Rust on RP2040 is worth revisiting once `embassy` stabilises and the RP2040 role is fully isolated with no shared `lib/` dependencies.
+
 ## Coding Style
 
 - Write concise C++: prefer initializer lists, `auto`, range-for, and inline lambdas over verbose equivalents.
