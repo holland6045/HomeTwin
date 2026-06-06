@@ -209,6 +209,68 @@ Rust on RP2040 is worth revisiting once `embassy` stabilises and the RP2040 role
 - Prefer short, precise names: `temp` not `temperatureValue`, `pkt` not `packetBuffer`, `btn` not `buttonState`.
 - No defensive no-op error handling; assert or fail fast at boundaries.
 
+## Recommended Libraries
+
+Curated beyond the standard FastLED / TFT_eSPI / Adafruit GFX stack. Prefer these over rolling custom implementations.
+
+### Protocol & Serialization
+| Library | Repo | Use |
+|---|---|---|
+| **EmbeddedProto** | `Embedded-AMS/EmbeddedProto` | Schema-first Protobuf for `DeskProtocol` — zero heap, C++11, AVR-safe |
+| **nanopb** | `nanopb/nanopb` | C alternative if AVR C++ codegen is impractical; same `.proto` source |
+| **QuickESPNow** | `gmag11/QuickESPNow` | Reliable ESP-NOW unicast/broadcast — sub-ms LED state distribution, no router |
+| **esp-matter** | `espressif/esp-matter` | Native Matter/Thread on ESP32-C6/H2 — appears in Apple Home, Google Home, HA simultaneously |
+
+### On-Device ML
+| Library | Repo | Use |
+|---|---|---|
+| **esp-tflite-micro** | `espressif/esp-tflite-micro` | Keyword spotting on mic or gesture classification on IMU, fully on-device |
+| **esp-dl** | `espressif/esp-dl` | S3 SIMD-accelerated person/face detection; AutoQuant handles quantization |
+| **esp-who** | `espressif/esp-who` | Face-detection pipelines pre-wired to camera for per-person lighting profiles |
+| **Edge Impulse** | `edgeimpulse/esp32-platformio-edge-impulse-standalone-example` | Train in cloud → PlatformIO C++ lib output; anomaly block works with no labeled data |
+| **tinyml4all-python** | `eloquentarduino/tinyml4all-python` | Exports sklearn models as C++ headers — runs on AVR where TFLite is too heavy |
+
+### RP2040 PIO
+| Library | Repo | Use |
+|---|---|---|
+| **PicoDVI** | `Wren6991/PicoDVI` | Bitbanged DVI/HDMI via 3 PIO state machines — secondary info display, zero external ICs |
+| **Pico-PIO-USB** | `sekigon-gonnoc/Pico-PIO-USB` | Second USB port on any GPIO — HID device to PC + USB host simultaneously |
+| **HyperSerialPico** | `awawa-dev/HyperSerialPico` | Drives 8 LED strips in parallel via PIO — per-zone desk segments at full sync |
+| **pio-i2c-hs** | `tmcqueen-materials/pio-i2c-hs` | PIO I2C at 3.4 Mbps vs 1 Mbps hardware ceiling for dense sensor buses |
+
+### Signal Processing & Sensor Fusion
+| Library | Repo | Use |
+|---|---|---|
+| **CMSIS-DSP** | `ARM-software/CMSIS-DSP` | 4096-point FFT + MFCC on mic buffer; hardware MAC on STM32 |
+| **Reefwing-AHRS** | `Reefwing-Software/Reefwing-AHRS` | Six fusion algorithms (Madgwick, Mahony, EKF) for posture detection from IMU |
+| **IMU_EKF** | `hobbeshunter/IMU_EKF` | Error-State Kalman Filter with native PlatformIO integration |
+| **espp** | `esp-cpp/espp` | 80+ ESP-IDF C++ components: Madgwick, MT6701 encoder, BLE GATT, task abstractions |
+
+### LED Effects & Dev Tools
+| Library | Repo | Use |
+|---|---|---|
+| **WLED (audio reactive)** | `wled/WLED` | 22-band FFT + 100+ reactive effects via I2S mic; accepts DDP/Art-Net from coordinator |
+| **wled-sim** | `13rac1/wled-sim` | Desktop WLED REST + DDP simulator — iterate lighting logic without hardware |
+| **WLED Studio** | `dolevbs.github.io/wledStudio` | WLED effects engine compiled to WASM — most faithful browser-based preview |
+
+### Presence & Desk Intelligence
+| Library | Repo | Use |
+|---|---|---|
+| **LD2410** | `mgiesen/LD2410` | Engineering-mode per-gate energy — distinguishes seated vs. absent vs. nearby |
+| **LD2410Async** | `lizardking/LD2410Async` | FreeRTOS-task-based LD2410 driver — radar in background, main loop unblocked |
+
+### UI & Display
+| Library | Repo | Use |
+|---|---|---|
+| **LVGL + SquareLine Studio** | `lvgl/lvgl` | WYSIWYG UI editor exports `ui.c`/`ui.h` compilable against any LVGL backend |
+| **esp32-smartdisplay** | `rzeldent/esp32-smartdisplay` | Pre-wired LVGL drivers for commodity ESP32 TFT + XPT2046 panels |
+
+### Home Automation
+| Library | Repo | Use |
+|---|---|---|
+| **OpenMQTTGateway** | `1technophile/OpenMQTTGateway` | BLE scan → MQTT; decodes 400+ BLE sensor formats without custom per-sensor firmware |
+| **aioesphomeapi** | `esphome/aioesphomeapi` | Implement the ESPHome native Protobuf API on ESP32 — sub-10 ms HA updates, no broker |
+
 ## Serial Debug Output
 
 Use a consistent log macro rather than raw `Serial.print`. Define log levels via build flags (`-D LOG_LEVEL=2`). The `native` test environment should compile with `LOG_LEVEL=0` to suppress output.
