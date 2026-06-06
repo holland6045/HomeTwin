@@ -69,6 +69,16 @@ data/                   # SPIFFS/LittleFS assets for ESP32 (web UI, config files
 
 ## Architecture Principles
 
+### Modularity & Binary Footprint
+Every hardware integration is opt-in. A target that doesn't use a driver must pay zero ROM/RAM cost for it — no global constructors, no linked symbols, no pulled-in library headers.
+
+Rules:
+- Concrete driver `.cpp` files wrap their entire body in the relevant build flag (`#ifdef LED_DRIVER_WS2812B`, `#ifdef DISPLAY_SPI_TFT`, etc.). If the flag is absent the translation unit is empty.
+- Hardware library headers (`FastLED.h`, `TFT_eSPI.h`, sensor SDK headers) are included only inside concrete driver `.cpp` files — never in `include/` or `lib/` shared headers.
+- `platformio.ini` uses per-environment `lib_deps` and `lib_ignore` to prevent unused libraries from linking at all. Do not rely solely on linker `--gc-sections` to strip dead code.
+- Adding a new sensor, display, or LED driver must not increase binary size on any environment that does not set its flag.
+- The `native` test environment is the proof: it compiles all shared `lib/` code with no hardware flags set and no hardware libraries installed. If `pio test -e native` breaks when a new driver is added, the driver violated the isolation rule.
+
 ### Hardware Abstraction Layer (HAL)
 All hardware-specific code lives behind interfaces defined in `include/`. Concrete implementations go in `lib/`. Tests use mock implementations. Never call platform-specific APIs (e.g., `digitalWrite`, `gpio_set_level`) directly in business logic — wrap them.
 
