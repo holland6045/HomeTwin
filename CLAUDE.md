@@ -185,6 +185,14 @@ Each environment in `platformio.ini` follows this naming convention:
 
 The `native` environment is used exclusively for unit tests and must not depend on any hardware library.
 
+## Coding Style
+
+- Write concise C++: prefer initializer lists, `auto`, range-for, and inline lambdas over verbose equivalents.
+- Use established embedded acronyms without expansion: `ISR`, `DMA`, `HAL`, `PWM`, `ADC`, `GPIO`, `MCU`, `OTA`, `NVS`, `IRQ`, `CS`, `SCL`, `SDA`, `MOSI`, `MISO`, `CLK`.
+- No filler comments — omit anything a competent reader infers from the code. Only comment non-obvious hardware constraints or protocol quirks.
+- Prefer short, precise names: `temp` not `temperatureValue`, `pkt` not `packetBuffer`, `btn` not `buttonState`.
+- No defensive no-op error handling; assert or fail fast at boundaries.
+
 ## Serial Debug Output
 
 Use a consistent log macro rather than raw `Serial.print`. Define log levels via build flags (`-D LOG_LEVEL=2`). The `native` test environment should compile with `LOG_LEVEL=0` to suppress output.
