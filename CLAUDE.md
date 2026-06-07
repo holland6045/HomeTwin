@@ -136,44 +136,58 @@ The system must degrade gracefully when any MCU node disconnects and resume auto
 All hardware-specific code lives behind interfaces defined in `include/`. Concrete implementations go in `lib/`. Tests use mock implementations. Never call platform-specific APIs (e.g., `digitalWrite`, `gpio_set_level`) directly in business logic — wrap them.
 
 ### Inter-MCU Protocol
-MCUs communicate over UART or I2C using a shared packet format defined in `lib/DeskProtocol/`. The ESP32 acts as the bus master. New message types require updating the protocol definition and all listening nodes.
+MCUs communicate over UART, I2C, SPI, or ESP-NOW using a shared packet format defined in `lib/DeskProtocol/`. The ESP32 acts as coordinator and bus master. New message types require updating the protocol definition and all listening nodes.
 
-**Three logical channels** (inspired by PROFINET's CR model — never conflate them, they have different priorities and delivery guarantees):
+**Three traffic classes — never conflate them:**
 
-| Channel | `msg_class` | Delivery | Use |
+| Class | `msg_class` | Delivery | Use |
 |---|---|---|---|
 | Cyclic | `0` | Push, no ack | Sensor readings, LED/actuator commands at fixed interval |
-| Acyclic | `1` | Confirmed request/response | Config writes, parameter reads, firmware version queries |
-| Alarm | `2` | Confirmed, preempts acyclic | Fault notifications, node plug/pull events |
+| Config | `1` | Confirmed request/response | Parameter writes, record reads, firmware version queries |
+| Alarm | `2` | Confirmed, preempts config | Fault notifications, node connect/disconnect events |
 
-A long acyclic transfer must never block an incoming alarm. On UART, the ISR checks `msg_class` on each frame header and inserts alarm frames ahead of queued acyclic traffic.
+Alarm frames must never wait behind a config transfer. On UART, the ISR reads `msg_class` from each frame header and inserts alarm frames ahead of any queued config traffic.
 
 **Cyclic frame structure:**
 ```cpp
 struct CyclicFrame {
     uint8_t  node_id;
-    uint8_t  msg_class;   // = 0
-    uint16_t frame_id;    // identifies the data source (slot/subslot)
-    uint8_t  iops;        // provider status: 0x80 = GOOD, 0x00 = BAD
-    uint8_t  payload[CYCLIC_PAYLOAD_MAX];
-    uint8_t  iocs;        // consumer status echoed back in opposite direction
+    uint8_t  msg_class;              // = 0
+    uint16_t slot_id;                // identifies the data source (slot/subslot)
+    uint8_t  status;                 // 0x80 = data valid, 0x00 = data invalid
+    uint8_t  payload[CYCLIC_MAX];
+    uint8_t  consumer_status;        // echoed back by the receiver
 };
 ```
-Consumers must check `iops == 0x80` before using payload data. If `iops == 0x00`, hold last known good value and raise an alarm.
+Consumers must check `status == 0x80` before using payload data. On `status == 0x00`, hold last known good value and raise an alarm.
 
 **Data consistency — double buffer:**
-Each node maintains shadow and active frame buffers. Sensor DMA/ISR writes to the shadow buffer and sets `swap_pending`. The cyclic send tick atomically swaps shadow→active before transmitting. The active buffer is never written during transmission — no mutex needed, no torn reads.
+Each node maintains shadow and active frame buffers. Sensor DMA/ISR writes to the shadow buffer and sets `swap_pending`. The cyclic send tick atomically swaps shadow→active before transmitting. The active buffer is never written during transmission — no mutex, no torn reads.
 
 **Node capability model:**
-At boot each node sends a registration packet describing its slots: `{slot, subslot, direction, data_type, size_bytes}`. The ESP32 validates this against its stored `data/expected_config.json`. Mismatches raise a `PLUG` alarm; the node is accepted into `DEGRADED` mode rather than rejected outright. Node descriptors are stored as `data/<node_type>.json` (SPIFFS) and exposed via the ESP32 web API — allowing a companion tool to introspect the live system without firmware knowledge.
+At boot each node sends a registration packet declaring its data slots: `{slot, subslot, direction, data_type, size_bytes}`. The coordinator validates this against `data/expected_config.json` stored in SPIFFS. Mismatches raise a `PLUG` alarm; the node is accepted into `DEGRADED` rather than rejected. Descriptors are stored as `data/<node_type>.json` and exposed via the ESP32 web API — a companion tool can introspect the live system without firmware knowledge.
 
 **Commissioning state machine (every node):**
 ```
-OFFLINE → WAITING_CONNECT → PARAMETERIZING → OPERATE
+BOOT → INIT → VALIDATING → OPERATE
+         ↑          |           |
+         └──────────┴───────────┘  (connection watchdog fires)
 ```
-- Node rejects cyclic output commands until it reaches `OPERATE` — prevents actuator commands reaching hardware before parameterization completes.
-- On coordinator loss: `OPERATE → WAITING_CONNECT` (Layer 2 watchdog). Actuators enter safe state immediately (Layer 1 watchdog).
-- Re-entry to `OPERATE` after reconnect does not require a full re-parameterize if the coordinator sends a `RESUME` flag and the node's config hash matches.
+- `BOOT`: Power-on. No comms.
+- `INIT`: Identity and capability exchange. Config-class traffic only. No cyclic data yet.
+- `VALIDATING`: Cyclic inputs are flowing but output commands are frozen at safe state. The coordinator must receive 5 consecutive valid input frames before sending `ENABLE_OUTPUTS`. This ensures actuator hardware is never commanded before the data pipeline is confirmed healthy.
+- `OPERATE`: Full I/O active. Both watchdog layers running.
+- On coordinator loss: `OPERATE → INIT` (connection watchdog). Actuators enter safe state immediately (cycle watchdog).
+- Fast resume: if the coordinator sends `RESUME` and the node's config hash matches the stored config, `VALIDATING` is skipped and the node re-enters `OPERATE` directly.
+
+**Process image (coordinator):**
+The coordinator maintains a flat array `process_image[node_id][slot][subslot]` holding the latest `Reading` from every node. The cyclic receive path writes to the process image; control logic and the web API read from it at their own rate. This decouples control loop timing from bus timing and eliminates per-node addressing in application code.
+
+**Zone sync (LED output coherence):**
+The coordinator broadcasts a lightweight `SYNC` frame over ESP-NOW at the start of each LED cycle. All nodes arm their LED output buffer on the previous cycle and latch it on `SYNC` receipt. This eliminates visible tearing across desk zones regardless of individual bus timing variation.
+
+**Change notifications:**
+Nodes may subscribe to coordinator variables (e.g. a lighting zone colour) via the config channel. The coordinator pushes an update only when the value changes — not every cycle. Use this for config state that changes infrequently; it cuts bus load without sacrificing responsiveness.
 
 **Alarm model:**
 ```cpp
@@ -182,20 +196,20 @@ enum AlarmSeverity : uint8_t { SEV_FAULT=0, SEV_MAINTENANCE=1, SEV_WARNING=2 };
 
 struct AlarmFrame {
     uint8_t  node_id, hub_id;
-    uint8_t  alarm_type;      // AlarmType
-    uint8_t  severity;        // AlarmSeverity
+    uint8_t  alarm_type;
+    uint8_t  severity;
     uint8_t  slot, subslot;
-    uint16_t error_code;      // standardized: 0x0001 short-circuit, 0x0002 wire-break, 0x0004 underrange, 0x0008 overrange
+    uint16_t error_code;      // 0x0001 short-circuit, 0x0002 wire-break, 0x0004 underrange, 0x0008 overrange
     uint8_t  disappears;      // 1 = fault cleared
     uint32_t timestamp_ms;
 };
 ```
-Alarm delivery is confirmed: the node holds the next alarm until the coordinator sends `ALARM_ACK`. Maximum 4 pending alarms per AVR node. The ESP32 maintains an active alarm registry (`AlarmEntry[]`); entries are added on receipt and removed on `disappears=1`. The web dashboard reads this registry — not individual node poll results.
+Alarm delivery is confirmed: the node holds the next alarm until the coordinator sends `ALARM_ACK`. Maximum 4 pending alarms per AVR node. The coordinator maintains an active alarm registry (`AlarmEntry[]`); entries are added on receipt and removed on `disappears=1`. The web dashboard reads this registry — not individual node poll results.
 
 **Two-layer watchdog (every node):**
-- **Layer 1 — cycle watchdog:** If no valid cyclic frame arrives within `cycle_ms × DataHoldFactor` (default factor=3), outputs transition to safe state and `iops` is set to `0x00`. The node stays connected.
-- **Layer 2 — AR watchdog:** If no frames arrive for `AR_TIMEOUT_MS` (default 5000 ms), the node drops to `WAITING_CONNECT` and releases all resources.
-- On valid frame receipt: reset both timers, restore `iops=0x80`, exit safe state.
+- **Layer 1 — cycle watchdog:** Each node measures the last 10 inter-frame intervals and sets its deadline to `max_observed × 2 + 5 ms`. If no valid cyclic frame arrives by that deadline, outputs freeze at safe state and `status` is set to `0x00`. The node stays connected.
+- **Layer 2 — connection watchdog:** If no frames of any class arrive within 5 s, the node drops to `INIT` and releases resources.
+- On valid frame receipt: reset both timers, restore `status = 0x80`, exit safe state.
 
 Per-node safe states: LED driver → all pixels black + `show()`; motor → zero torque + brake; GPIO nodes → all outputs to defined inactive level.
 
