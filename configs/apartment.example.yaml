@@ -1,0 +1,107 @@
+# Apartment tracker configuration.
+# World frame: meters, z up, origin at a chosen apartment corner.
+
+world:
+  # optional Gaussian-splat scan (.ply/.splat): the dashboard's 3D tab
+  # renders live item markers, trails, and sensor overlays inside it.
+  # Calibrate camera poses from the same scan with:
+  #   apartment-tracker calibrate-cameras --colmap <dir> --pairs refpoints.yaml
+  # See docs/gaussian-splatting.md.
+  # splat_asset: scans/apartment.ply
+  # splat_transform: {position: [0, 0, 0], rotation_deg: [0, 0, 0], scale: 1.0}
+  zones:
+    - {name: living_room,     min: [0, 0, 0],        max: [5, 4, 2.6]}
+    - {name: kitchen,         min: [5, 0, 0],        max: [8, 4, 2.6]}
+    - {name: kitchen_counter, min: [6, 0.5, 0.8],    max: [7.5, 1.5, 1.1]}
+    - {name: entry_table,     min: [0, 0, 0.7],      max: [1, 0.6, 1.0]}
+    - {name: sofa,            min: [1.5, 2.8, 0.3],  max: [3.0, 3.8, 0.7]}
+
+items:
+  - id: keys
+    name: House keys
+    labels: [keys]           # anonymous detector classes that may be these keys
+    tags: ["aruco:7"]        # identifying tags: aruco:<id>, ble:<MAC>, rfid:<EPC>
+  - id: wallet
+    name: Wallet
+    tags: ["ble:AA:11:22:33:44:55"]
+  - id: phone
+    name: Phone
+    labels: [cell phone]
+    tags: ["ble:BB:66:77:88:99:00"]
+
+sensors:
+  # USB webcam (or ESP32-CAM MJPEG URL) + ArUco detection, projected onto
+  # the kitchen counter plane.
+  - type: camera
+    id: cam-kitchen
+    position: [7.5, 3.8, 2.3]
+    yaw_deg: -110
+    pitch_deg: 40
+    hfov_deg: 80
+    surface_z: 0.9
+    source: {type: opencv, device: 0}
+    detector: {type: aruco, dictionary: DICT_4X4_50}
+    # browser-loadable stream for the dashboard's camera-overlay view
+    # stream_url: "http://192.168.1.40/mjpeg"
+
+  # Same camera hardware, different brains: an ONNX model fine-tuned on your
+  # items via `apartment-tracker train detector_finetune`.
+  # - type: camera
+  #   id: cam-living
+  #   position: [0.2, 0.2, 2.4]
+  #   yaw_deg: 45
+  #   pitch_deg: 35
+  #   surface_z: 0.0
+  #   source: {type: opencv, device: "http://192.168.1.40/mjpeg"}
+  #   detector: {type: onnx, model_path: models/my_items.onnx, labels: [keys, wallet, cell phone]}
+
+  # Multi-camera 3D: overlapping cameras in ray mode emit sight rays that
+  # the fusion engine triangulates — no surface assumption, tracks items in
+  # motion. One viewpoint alone falls back to an item-height depth prior.
+  # - type: camera
+  #   id: cam-living-a
+  #   position: [0.0, 0.0, 2.4]
+  #   yaw_deg: 50
+  #   pitch_deg: 25
+  #   mode: ray
+  #   bearing_sigma_rad: 0.02
+  #   source: {type: opencv, device: "http://192.168.1.41/mjpeg"}
+  #   detector: {type: onnx, model_path: models/my_items.onnx, labels: [keys, wallet, cell phone]}
+  # - type: camera
+  #   id: cam-living-b
+  #   position: [5.0, 4.0, 2.4]
+  #   yaw_deg: -130
+  #   pitch_deg: 25
+  #   mode: ray
+  #   source: {type: opencv, device: "http://192.168.1.42/mjpeg"}
+  #   detector: {type: onnx, model_path: models/my_items.onnx, labels: [keys, wallet, cell phone]}
+
+  # JSON-lines TCP ingest for MCU nodes (ESP32 BLE scanners, RTI link meshes,
+  # anything). Raw "rssi" messages are converted with this path-loss model;
+  # retrain it with: apartment-tracker train path_loss
+  - type: network_bridge
+    id: bridge
+    port: 8787
+    tx_power: -59.0
+    exponent: 2.7
+    # nodes must send {"auth": "<token>"} as their first line (one check per
+    # connection — no per-message cost). Omit only on a trusted IoT VLAN.
+    # auth_token: "change-me-bridge-secret"
+
+tracker:
+  poll_hz: 10
+  stale_after_s: 300
+  dataset_dir: dataset
+  state_path: tracker_state.json   # last-known locations survive restarts
+  save_interval_s: 30
+
+api:
+  host: 127.0.0.1
+  port: 8080
+  # Bearer-token auth: viewer = read-only (dashboards), admin = read+write
+  # (tagging, splat upload). Without tokens, reads are open and writes are
+  # loopback-only. Secrets come from env/file — never commit literals.
+  # auth:
+  #   tokens:
+  #     - {env: TRACKER_ADMIN_TOKEN, role: admin}
+  #     - {file: /etc/apartment-tracker/viewer.token, role: viewer}
