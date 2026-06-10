@@ -25,6 +25,8 @@ class AppConfig:
     api_host: str = "127.0.0.1"
     api_port: int = 8080
     dataset_dir: str = "dataset"
+    state_path: str | None = None
+    save_interval_s: float = 30.0
     raw: dict = field(default_factory=dict)
 
 
@@ -55,5 +57,7 @@ def load_config(path: str | Path) -> AppConfig:
         api_host=api.get("host", "127.0.0.1"),
         api_port=int(api.get("port", 8080)),
         dataset_dir=tracker.get("dataset_dir", "dataset"),
+        state_path=tracker.get("state_path"),
+        save_interval_s=float(tracker.get("save_interval_s", 30.0)),
         raw=raw,
     )

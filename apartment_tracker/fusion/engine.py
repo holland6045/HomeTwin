@@ -163,6 +163,45 @@ class FusionEngine:
         track.contributors[obs.sensor_id] = track.contributors.get(obs.sensor_id, 0) + 1
         return item_id
 
+    def dump_state(self) -> list[dict]:
+        """Serializable track state for persistence across restarts."""
+        return [
+            {
+                "item_id": t.item_id,
+                "x": list(t.filter.x),
+                "P": [row[:] for row in t.filter.P],
+                "last_update": t.last_update,
+                "last_sensor": t.last_sensor,
+                "observation_count": t.observation_count,
+                "contributors": dict(t.contributors),
+            }
+            for t in self.tracks.values()
+        ]
+
+    def restore_state(self, entries: list[dict]) -> int:
+        """Recreate tracks from dump_state output. Returns tracks restored.
+
+        Entries for items no longer in the registry are skipped; original
+        timestamps are kept so age/staleness stay truthful.
+        """
+        restored = 0
+        for e in entries:
+            if self.items.get(e["item_id"]) is None or e["item_id"] in self.tracks:
+                continue
+            kf = KalmanFilter3D(tuple(e["x"][:3]))
+            kf.x = [float(v) for v in e["x"]]
+            kf.P = [[float(v) for v in row] for row in e["P"]]
+            self.tracks[e["item_id"]] = TrackState(
+                item_id=e["item_id"],
+                filter=kf,
+                last_update=float(e["last_update"]),
+                last_sensor=e.get("last_sensor", ""),
+                observation_count=int(e.get("observation_count", 0)),
+                contributors=dict(e.get("contributors", {})),
+            )
+            restored += 1
+        return restored
+
     def snapshot(self, now: float | None = None) -> list[dict]:
         """Current best estimate per item, for the API/CLI layers."""
         now = now if now is not None else time.time()

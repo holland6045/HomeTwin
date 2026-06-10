@@ -4,6 +4,7 @@ GET  /health           -> {"status": "ok", ...}
 GET  /items            -> all item estimates
 GET  /items/<query>    -> one item by id or name (404 if unknown)
 GET  /presence         -> latest occupancy estimate (tomography etc.)
+GET  /events           -> recent zone-change events, oldest first
 POST /items/<id>/tags  -> {"tag": "ble:AA:.."} manual tagging at runtime
 """
 
@@ -38,6 +39,8 @@ def make_handler(tracker: Tracker):
                 self._send(200, entry) if entry else self._send(404, {"error": "unknown item"})
             elif parts == ["presence"]:
                 self._send(200, tracker.presence or {"status": "no_data"})
+            elif parts == ["events"]:
+                self._send(200, list(tracker.events))
             else:
                 self._send(404, {"error": "not found"})
 

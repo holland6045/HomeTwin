@@ -88,6 +88,14 @@ ceiling-mounted (coplanar) anchors otherwise leave z unobservable and a
 naive init converges to the mirror solution above the ceiling. Uncertainty
 grows when nothing reports; estimates go `stale`, never silently wrong.
 
+### Persistence & history
+
+With `tracker.state_path` set, tracks are saved atomically (periodic +
+shutdown) and restored on start with their original timestamps — after a
+reboot the answer is still "wallet: sofa, 2 h ago [stale]" instead of
+"never seen". Zone transitions are recorded as events (`GET /events`):
+"keys moved kitchen_counter → hall at 18:42".
+
 ### Plugins (`apartment_tracker/registry.py`)
 
 Four kinds: `sensor`, `detector`, `frame_source`, `trainer`. Config selects
@@ -115,7 +123,9 @@ Built in today:
 ### MCU integration
 
 MCUs stay dumb and replaceable: anything that can open a TCP socket and
-print one JSON object per line participates via the `network_bridge` sensor:
+print one JSON object per line participates via the `network_bridge` sensor
+(full contract in `docs/mcu-integration.md`, reference ESP32 BLE-scanner
+node in `firmware/esp32-ble-scanner/`):
 
 ```json
 {"type": "rssi", "sensor_id": "esp32-hall", "mac": "AA:BB:CC:DD:EE:FF",
@@ -158,12 +168,15 @@ apartment_tracker/
   detectors/           # aruco, onnx
   training/            # dataset capture + trainer plugins
   config.py            # YAML -> world + items + sensor fleet
-  tracker.py           # poll/fuse orchestrator loop
+  tracker.py           # poll/fuse orchestrator loop, zone-change events
+  store.py             # atomic state persistence across restarts
   api.py               # stdlib HTTP API
   simulate.py          # full synthetic apartment (demo + e2e tests)
   cli.py
 configs/apartment.example.yaml
-tests/                 # 44 tests, hardware-free
+docs/mcu-integration.md
+firmware/esp32-ble-scanner/   # reference MCU node (PlatformIO)
+tests/                 # 50 tests, hardware-free
 ```
 
 ## Extending without breaking anything
