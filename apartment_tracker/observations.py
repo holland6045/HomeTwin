@@ -5,6 +5,9 @@ never touches the fusion engine — it only has to emit one of these shapes:
 
 - PositionObservation: full 3D fix (camera + known geometry, UWB, ...)
 - RangeObservation:    distance from a known anchor (BLE RSSI, UWB, acoustic)
+- BearingObservation:  a sight ray from a known origin (camera without a
+                       surface assumption, directional antenna) — one ray
+                       constrains direction, two viewpoints fix 3D
 - AreaObservation:     diffuse blob with a centroid + spread (RF tomography,
                        PIR zones, pressure mats)
 
@@ -38,6 +41,13 @@ class RangeObservation(Observation):
     anchor: tuple[float, float, float] = (0.0, 0.0, 0.0)
     range_m: float = 0.0
     sigma_m: float = 1.0
+
+
+@dataclass
+class BearingObservation(Observation):
+    origin: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    direction: tuple[float, float, float] = (1.0, 0.0, 0.0)  # unit, world frame
+    sigma_rad: float = 0.02
 
 
 @dataclass

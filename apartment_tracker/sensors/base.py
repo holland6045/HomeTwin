@@ -9,6 +9,7 @@ adapter — the tracker loop only ever sees Observation objects.
 
 from __future__ import annotations
 
+import time
 from abc import ABC, abstractmethod
 
 from apartment_tracker.observations import Observation
@@ -17,6 +18,8 @@ from apartment_tracker.observations import Observation
 class SensorAdapter(ABC):
     def __init__(self, sensor_id: str):
         self.sensor_id = sensor_id
+        # observation timestamp source; replace for simulation/replay
+        self.clock = time.time
 
     def start(self) -> None:
         """Open hardware / spawn worker threads. Default: nothing."""

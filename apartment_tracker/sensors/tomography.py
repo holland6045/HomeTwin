@@ -168,7 +168,7 @@ class TomographySensor(SensorAdapter):
             return []
         img = self.grid.reconstruct(atten)
         self._last_image = img
-        self._last_image_ts = time.time()
+        self._last_image_ts = self.clock()
         result = self.grid.blob(img)
         if result is None:
             return []
@@ -176,7 +176,7 @@ class TomographySensor(SensorAdapter):
         return [
             AreaObservation(
                 sensor_id=self.sensor_id,
-                timestamp=time.time(),
+                timestamp=self.clock(),
                 label=self.label,
                 confidence=min(peak / 10.0, 1.0),
                 centroid=(cx, cy, self.height_m),

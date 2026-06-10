@@ -58,15 +58,35 @@ def map_overlay(tracker) -> dict:
                     "anchor": list(r["anchor"]),
                 }
             )
+    items = tracker.snapshot()
+    positions = {e["item_id"]: e.get("position") for e in items}
+    bearings = []
+    for (sensor_id, item_id), b in tracker.last_bearings.items():
+        pos = positions.get(item_id)
+        length = (
+            math.dist(b["origin"], pos) * 1.15 if pos else 6.0
+        )  # draw slightly past the estimate
+        bearings.append(
+            {
+                "sensor_id": sensor_id,
+                "item_id": item_id,
+                "origin": list(b["origin"]),
+                "direction": list(b["direction"]),
+                "length_m": round(length, 2),
+                "age_s": round(now - b["timestamp"], 1),
+            }
+        )
     return {
         "timestamp": now,
         "zones": zones,
-        "items": tracker.snapshot(),
+        "items": items,
         "rings": rings,
+        "bearings": bearings,
         "heatmaps": heatmaps,
         "cameras": cameras,
         "presence": tracker.presence,
         "events": list(tracker.events)[-20:],
+        "splat": bool(getattr(tracker.cfg, "splat_asset", None)),
     }
 
 

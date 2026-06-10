@@ -4,12 +4,16 @@ Frame sources and detectors are both plugins, so "a camera" can be a USB
 webcam, an ESP32-CAM MJPEG stream, or a file of test images — paired with an
 ArUco, ONNX, or any custom detector — without this module changing.
 
-Projection model: pinhole at a known pose. A detection's bbox center defines
-a ray; we intersect it with a horizontal surface plane (configurable height,
-e.g. floor 0.0 or counter 0.9). This gives full 3D from a single camera for
-items resting on known surfaces — the dominant case for keys/wallet/phone.
-Items not on a configured plane still produce a high-sigma estimate which
-fusion refines with other modalities.
+Two projection modes per camera (config `mode`):
+
+- "surface" (default): intersect the detection ray with a horizontal plane
+  (floor 0.0, counter 0.9, ...) -> PositionObservation. Full 3D from one
+  camera for items resting on known surfaces.
+- "ray": emit the sight ray itself as a BearingObservation. No surface
+  assumption; the fusion engine triangulates rays from two or more
+  overlapping cameras into true 3D, and falls back to an item-height depth
+  prior when only one viewpoint sees the item. Use this for multi-camera
+  rooms and for items in motion.
 """
 
 from __future__ import annotations
@@ -17,7 +21,12 @@ from __future__ import annotations
 import math
 import time
 
-from apartment_tracker.observations import Detection, PositionObservation
+from apartment_tracker.observations import (
+    BearingObservation,
+    Detection,
+    Observation,
+    PositionObservation,
+)
 from apartment_tracker.registry import create, register
 from apartment_tracker.sensors.base import SensorAdapter
 
@@ -93,6 +102,8 @@ class CameraSensor(SensorAdapter):
         detector=None,
         surface_z: float = 0.0,
         base_sigma_m: float = 0.25,
+        mode: str = "surface",  # "surface" | "ray"
+        bearing_sigma_rad: float = 0.02,
         # config-file path: build sub-plugins by name
         position: tuple | None = None,
         yaw_deg: float = 0.0,
@@ -113,10 +124,14 @@ class CameraSensor(SensorAdapter):
             detector = create("detector", cfg.pop("type"), **cfg)
         if frame_source is None or detector is None:
             raise ValueError(f"camera {sensor_id!r} needs a frame source and a detector")
+        if mode not in ("surface", "ray"):
+            raise ValueError(f"camera {sensor_id!r}: mode must be 'surface' or 'ray'")
         self.frame_source = frame_source
         self.detector = detector
         self.surface_z = surface_z
         self.base_sigma_m = base_sigma_m
+        self.mode = mode
+        self.bearing_sigma_rad = bearing_sigma_rad
 
     def start(self) -> None:
         if hasattr(self.frame_source, "start"):
@@ -126,8 +141,19 @@ class CameraSensor(SensorAdapter):
         if hasattr(self.frame_source, "stop"):
             self.frame_source.stop()
 
-    def to_observation(self, det: Detection, ts: float) -> PositionObservation | None:
+    def to_observation(self, det: Detection, ts: float) -> Observation | None:
         u, v = det.center
+        if self.mode == "ray":
+            return BearingObservation(
+                sensor_id=self.sensor_id,
+                timestamp=ts,
+                item_id=det.tag_id,
+                label=det.label,
+                confidence=det.confidence,
+                origin=self.geometry.position,
+                direction=self.geometry.ray(u, v),
+                sigma_rad=self.bearing_sigma_rad,
+            )
         pos = self.geometry.project_to_plane(u, v, self.surface_z)
         if pos is None:
             return None
@@ -154,11 +180,11 @@ class CameraSensor(SensorAdapter):
             "stream_url": self.stream_url,
         }
 
-    def poll(self) -> list[PositionObservation]:
+    def poll(self) -> list[Observation]:
         frame = self.frame_source.get_frame()
         if frame is None:
             return []
-        ts = time.time()
+        ts = self.clock()
         out = []
         for det in self.detector.detect(frame):
             obs = self.to_observation(det, ts)

@@ -46,6 +46,19 @@ def make_handler(tracker: Tracker):
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
+            elif parts == ["assets", "splat"]:
+                path = getattr(tracker.cfg, "splat_asset", None)
+                try:
+                    with open(path, "rb") as f:
+                        body = f.read()
+                except (TypeError, OSError):
+                    self._send(404, {"error": "no splat asset configured"})
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", "application/octet-stream")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
             elif parts == ["overlay", "map"]:
                 self._send(200, map_overlay(tracker))
             elif len(parts) == 3 and parts[:2] == ["overlay", "camera"]:

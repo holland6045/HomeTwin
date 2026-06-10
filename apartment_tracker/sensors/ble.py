@@ -62,7 +62,7 @@ class BLEScannerSensor(SensorAdapter):
     def poll(self) -> list[RangeObservation]:
         if self.source is None:
             return []
-        ts = time.time()
+        ts = self.clock()
         out = []
         for mac, rssi in self.source.readings():
             d = self.model.rssi_to_range(rssi)

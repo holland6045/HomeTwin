@@ -68,6 +68,7 @@ Every sensing modality reduces to one of three shapes before fusion
 |---|---|---|
 | `PositionObservation` | 3D fix + sigma | camera+detector, UWB, anything with geometry |
 | `RangeObservation` | distance from a known anchor | BLE RSSI, UWB, acoustic ranging |
+| `BearingObservation` | sight ray from a known origin | ray-mode cameras, directional antennas |
 | `AreaObservation` | diffuse centroid + spread | RF tomography, PIR zones, pressure mats |
 
 The fusion engine only knows these shapes. Adding a sensing modality never
@@ -85,11 +86,22 @@ existing track so a look-alike object across the room can't hijack it.
 ### Fusion
 
 Per item: a 6-state (position+velocity) Kalman filter, pure-Python.
-Position/area observations are linear updates; ranges are EKF updates.
-Range-only tracks are seeded by coarse-grid multilateration at item height —
-ceiling-mounted (coplanar) anchors otherwise leave z unobservable and a
-naive init converges to the mirror solution above the ceiling. Uncertainty
-grows when nothing reports; estimates go `stale`, never silently wrong.
+Position/area observations are linear updates; ranges and bearings are EKF
+updates (azimuth/elevation measurement model for rays). Range-only tracks
+are seeded by coarse-grid multilateration at item height — ceiling-mounted
+(coplanar) anchors otherwise leave z unobservable and a naive init
+converges to the mirror solution above the ceiling. Uncertainty grows when
+nothing reports; estimates go `stale`, never silently wrong.
+
+**Multi-camera 3D (`mode: ray`):** overlapping cameras emit sight rays
+instead of assuming a surface plane. Rays are buffered per item and
+triangulated (least-squares closest point, with a viewpoint-diversity
+check) to seed the track; after that every frame from every camera is an
+EKF refinement, so two cameras watching the same room track an item moving
+through free space — in the bundled simulation the carried phone tracks to
+~2 cm where BLE alone managed ~1.7 m. A single ray-mode camera degrades
+gracefully to an item-height depth prior. Camera sight-lines are drawn on
+the dashboard map ("Camera rays" layer).
 
 ### Visualization: fusion overlays
 
@@ -110,6 +122,12 @@ server only assembles JSON (`/overlay/map`, `/overlay/camera/<id>`);
 rendering is client-side canvas, so the core stays dependency-free. Any
 sensor can publish a drawable layer by implementing `overlay()` — the UI
 picks it up without changes.
+
+**3D scan tab (optional):** point `world.splat_asset` at a Gaussian-splat
+scan of the apartment (`.ply` from Polycam/Luma/nerfstudio) and the
+dashboard grows a 3D tab rendering it in WebGL (renderer lazy-loaded
+client-side; the tracker host never pays for it). Viability analysis and
+the recommended scan→calibrate workflow: `docs/gaussian-splatting.md`.
 
 ### Persistence & history
 

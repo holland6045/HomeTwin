@@ -2,6 +2,9 @@
 # World frame: meters, z up, origin at a chosen apartment corner.
 
 world:
+  # optional Gaussian-splat scan (.ply/.splat) shown in the dashboard's 3D
+  # tab; see docs/gaussian-splatting.md
+  # splat_asset: scans/apartment.ply
   zones:
     - {name: living_room,     min: [0, 0, 0],        max: [5, 4, 2.6]}
     - {name: kitchen,         min: [5, 0, 0],        max: [8, 4, 2.6]}
@@ -46,6 +49,27 @@ sensors:
   #   pitch_deg: 35
   #   surface_z: 0.0
   #   source: {type: opencv, device: "http://192.168.1.40/mjpeg"}
+  #   detector: {type: onnx, model_path: models/my_items.onnx, labels: [keys, wallet, cell phone]}
+
+  # Multi-camera 3D: overlapping cameras in ray mode emit sight rays that
+  # the fusion engine triangulates — no surface assumption, tracks items in
+  # motion. One viewpoint alone falls back to an item-height depth prior.
+  # - type: camera
+  #   id: cam-living-a
+  #   position: [0.0, 0.0, 2.4]
+  #   yaw_deg: 50
+  #   pitch_deg: 25
+  #   mode: ray
+  #   bearing_sigma_rad: 0.02
+  #   source: {type: opencv, device: "http://192.168.1.41/mjpeg"}
+  #   detector: {type: onnx, model_path: models/my_items.onnx, labels: [keys, wallet, cell phone]}
+  # - type: camera
+  #   id: cam-living-b
+  #   position: [5.0, 4.0, 2.4]
+  #   yaw_deg: -130
+  #   pitch_deg: 25
+  #   mode: ray
+  #   source: {type: opencv, device: "http://192.168.1.42/mjpeg"}
   #   detector: {type: onnx, model_path: models/my_items.onnx, labels: [keys, wallet, cell phone]}
 
   # JSON-lines TCP ingest for MCU nodes (ESP32 BLE scanners, RTI link meshes,

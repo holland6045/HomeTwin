@@ -80,6 +80,59 @@ class KalmanFilter3D:
             H[0][i] = d[i] / pred
         self._update(H, [range_m - pred], [[sigma_m**2]])
 
+    @staticmethod
+    def _bearing_model(
+        position: tuple[float, float, float],
+        origin: tuple[float, float, float],
+        direction: tuple[float, float, float],
+    ) -> tuple[la.Mat, la.Vec] | None:
+        """Jacobian + residual for h(x) = (azimuth, elevation) seen from origin."""
+        dx, dy, dz = (position[i] - origin[i] for i in range(3))
+        rho2 = dx * dx + dy * dy
+        rho = math.sqrt(rho2)
+        r2 = rho2 + dz * dz
+        if rho < 1e-6:
+            return None  # directly above/below origin; azimuth undefined
+        az_pred = math.atan2(dy, dx)
+        el_pred = math.atan2(dz, rho)
+        az_meas = math.atan2(direction[1], direction[0])
+        el_meas = math.atan2(direction[2], math.hypot(direction[0], direction[1]))
+        wrap = lambda a: (a + math.pi) % (2.0 * math.pi) - math.pi
+        H = la.zeros(2, 6)
+        H[0][0] = -dy / rho2
+        H[0][1] = dx / rho2
+        H[1][0] = -dx * dz / (r2 * rho)
+        H[1][1] = -dy * dz / (r2 * rho)
+        H[1][2] = rho / r2
+        return H, [wrap(az_meas - az_pred), el_meas - el_pred]
+
+    def update_bearing(
+        self,
+        origin: tuple[float, float, float],
+        direction: tuple[float, float, float],
+        sigma_rad: float,
+    ) -> None:
+        """EKF update on a sight ray from origin toward the item."""
+        model = self._bearing_model(self.position, origin, direction)
+        if model is None:
+            return
+        H, residual = model
+        self._update(H, residual, la.eye(2, sigma_rad**2))
+
+    def mahalanobis_bearing_sq(
+        self,
+        origin: tuple[float, float, float],
+        direction: tuple[float, float, float],
+        sigma_rad: float,
+    ) -> float:
+        model = self._bearing_model(self.position, origin, direction)
+        if model is None:
+            return float("inf")
+        H, residual = model
+        S = la.mat_add(la.mat_mul(la.mat_mul(H, self.P), la.transpose(H)), la.eye(2, sigma_rad**2))
+        sol = la.mat_vec(la.inverse(S), residual)
+        return sum(r * s for r, s in zip(residual, sol))
+
     def mahalanobis_sq(self, z: tuple[float, float, float], sigma_m: float) -> float:
         """Squared gating distance of a position measurement against this track."""
         S = [[self.P[i][j] for j in range(3)] for i in range(3)]

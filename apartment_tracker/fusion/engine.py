@@ -11,13 +11,16 @@ Identity resolution order:
 
 from __future__ import annotations
 
+import math
 import time
 from dataclasses import dataclass, field
 
+from apartment_tracker import linalg as la
 from apartment_tracker.fusion.kalman import KalmanFilter3D
 from apartment_tracker.items import ItemRegistry
 from apartment_tracker.observations import (
     AreaObservation,
+    BearingObservation,
     Observation,
     PositionObservation,
     RangeObservation,
@@ -29,6 +32,46 @@ ITEM_HEIGHT_PRIOR_M = 0.8  # items rest on floors/tables, not at ceiling height
 ITEM_HEIGHT_SIGMA_M = 0.6
 MIN_ANCHORS_FOR_INIT = 3
 MAX_PENDING_BEFORE_INIT = 5
+MIN_RAY_ANGLE_RAD = 0.035  # ~2 deg of viewpoint diversity before triangulating
+
+
+def triangulate_rays(rays: list[BearingObservation]) -> tuple[float, float, float] | None:
+    """Least-squares closest point to a set of sight rays.
+
+    Solves sum_i (I - d_i d_i^T)(p - o_i) = 0. Returns None when rays are
+    too parallel to fix a point (single viewpoint, or cameras nearly in
+    line with the target).
+    """
+    best_angle = 0.0
+    for i, a in enumerate(rays):
+        for b in rays[i + 1 :]:
+            dot = sum(x * y for x, y in zip(a.direction, b.direction))
+            best_angle = max(best_angle, math.acos(max(min(dot, 1.0), -1.0)))
+    if best_angle < MIN_RAY_ANGLE_RAD:
+        return None
+    A = la.zeros(3, 3)
+    b = [0.0, 0.0, 0.0]
+    for ray in rays:
+        d = ray.direction
+        for r in range(3):
+            for c in range(3):
+                m = (1.0 if r == c else 0.0) - d[r] * d[c]
+                A[r][c] += m
+                b[r] += m * ray.origin[c]
+    try:
+        p = la.mat_vec(la.inverse(A), b)
+    except ValueError:
+        return None
+    return (p[0], p[1], p[2])
+
+
+def ray_at_height(obs: BearingObservation, z: float, fallback_t: float = 3.0) -> tuple:
+    """Point along a single ray at item height — the one-camera fallback."""
+    dz = obs.direction[2]
+    t = (z - obs.origin[2]) / dz if abs(dz) > 1e-6 else -1.0
+    if t <= 0:
+        t = fallback_t
+    return tuple(obs.origin[i] + obs.direction[i] * t for i in range(3))
 
 
 def multilaterate(
@@ -86,9 +129,11 @@ class FusionEngine:
         self.world = world
         self.stale_after_s = stale_after_s
         self.tracks: dict[str, TrackState] = {}
-        # range observations buffered per item until a track can be seeded
+        # range/bearing observations buffered per item until a track can be seeded
         self._pending: dict[str, dict[tuple, RangeObservation]] = {}
         self._pending_count: dict[str, int] = {}
+        self._pending_rays: dict[str, dict[str, BearingObservation]] = {}
+        self._pending_ray_count: dict[str, int] = {}
 
     def _resolve(self, obs: Observation) -> str | None:
         if obs.item_id and self.items.get(obs.item_id):
@@ -148,6 +193,34 @@ class FusionEngine:
             else:
                 track.filter.predict(max(obs.timestamp - track.last_update, 0.0))
                 track.filter.update_range(obs.anchor, obs.range_m, obs.sigma_m)
+        elif isinstance(obs, BearingObservation):
+            track = self.tracks.get(item_id)
+            if track is not None:
+                track.filter.predict(max(obs.timestamp - track.last_update, 0.0))
+                if anonymous and track.filter.mahalanobis_bearing_sq(
+                    obs.origin, obs.direction, obs.sigma_rad
+                ) > GATE_MAHALANOBIS_SQ:
+                    return None
+                track.filter.update_bearing(obs.origin, obs.direction, obs.sigma_rad)
+            else:
+                pend = self._pending_rays.setdefault(item_id, {})
+                pend[obs.sensor_id] = obs
+                self._pending_ray_count[item_id] = self._pending_ray_count.get(item_id, 0) + 1
+                seed = triangulate_rays(list(pend.values())) if len(pend) >= 2 else None
+                if seed is None:
+                    if self._pending_ray_count[item_id] < MAX_PENDING_BEFORE_INIT:
+                        return item_id  # buffered until a second viewpoint arrives
+                    # single-viewpoint fallback: depth from the item-height prior
+                    seed = ray_at_height(obs, ITEM_HEIGHT_PRIOR_M)
+                track = self._track_for(item_id, seed, obs.timestamp)
+                track.filter.P[0][0] = track.filter.P[1][1] = 1.0
+                track.filter.P[2][2] = ITEM_HEIGHT_SIGMA_M**2
+                for buffered in pend.values():
+                    track.filter.update_bearing(
+                        buffered.origin, buffered.direction, buffered.sigma_rad
+                    )
+                del self._pending_rays[item_id]
+                del self._pending_ray_count[item_id]
         elif isinstance(obs, AreaObservation):
             track = self.tracks.get(item_id)
             if track is not None:

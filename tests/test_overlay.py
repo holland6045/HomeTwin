@@ -57,8 +57,13 @@ def test_map_overlay_has_all_layers():
     peak = max(max(row) for row in hm["values"])
     assert peak == pytest.approx(1.0, abs=0.01)
     assert hm["nodes"]  # mesh node positions for drawing
-    # camera pose layer
-    assert d["cameras"][0]["sensor_id"] == "cam-kitchen"
+    # camera pose layer: surface camera + two ray-mode cameras
+    assert {c["sensor_id"] for c in d["cameras"]} == {
+        "cam-kitchen", "cam-living-a", "cam-living-b",
+    }
+    # ray-mode cameras leave visible sight-lines toward the phone
+    assert {b["sensor_id"] for b in d["bearings"]} == {"cam-living-a", "cam-living-b"}
+    assert all(b["item_id"] == "phone" for b in d["bearings"])
     assert d["presence"]["zone"] == "living_room"
 
 

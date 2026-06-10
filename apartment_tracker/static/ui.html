@@ -40,6 +40,7 @@
   <div id="view-wrap">
     <img id="stream" alt="" style="display:none">
     <canvas id="canvas"></canvas>
+    <div id="splat-wrap" style="display:none; position:absolute; inset:0;"></div>
   </div>
   <aside>
     <div class="card"><h2>Items</h2><div id="item-list"></div></div>
@@ -52,10 +53,11 @@ const LAYERS = [
   ["zones", "Zones", true],
   ["heat", "Tomography heat", true],
   ["rings", "BLE ranges", true],
+  ["bearings", "Camera rays", true],
   ["items", "Items", true],
   ["presence", "Presence", true],
 ];
-const state = { view: "map", cameras: [], data: null, toggles: {} };
+const state = { view: "map", cameras: [], data: null, toggles: {}, splat: false };
 for (const [k, , def] of LAYERS)
   state.toggles[k] = localStorage.getItem("layer:" + k) ?? String(def);
 
@@ -87,12 +89,38 @@ function buildTabs() {
   const el = document.getElementById("tabs");
   el.innerHTML = "";
   const views = [["map", "Map"], ...state.cameras.map(c => [c, "📷 " + c])];
+  if (state.splat) views.push(["3d", "3D scan"]);
   for (const [id, label] of views) {
     const b = document.createElement("button");
     b.textContent = label;
     b.className = state.view === id ? "active" : "";
-    b.onclick = () => { state.view = id; buildTabs(); tick(); };
+    b.onclick = () => { state.view = id; buildTabs(); setSplatVisible(id === "3d"); tick(); };
     el.append(b);
+  }
+}
+
+/* ---------- 3D Gaussian-splat view (optional asset) ---------- */
+let splatViewer = null;
+function setSplatVisible(show) {
+  document.getElementById("splat-wrap").style.display = show ? "block" : "none";
+  canvas.style.display = show ? "none" : "block";
+  if (show && !splatViewer) initSplat();
+}
+async function initSplat() {
+  const wrap = document.getElementById("splat-wrap");
+  wrap.textContent = "Loading 3D renderer…";
+  try {
+    // renderer loaded on demand from CDN; vendor these two modules locally
+    // for fully offline deployments
+    const GS = await import("https://esm.sh/@mkkellogg/gaussian-splats-3d@0.4.7");
+    wrap.textContent = "";
+    splatViewer = new GS.Viewer({ rootElement: wrap, sharedMemoryForWorkers: false });
+    await splatViewer.addSplatScene("/assets/splat", { format: GS.SceneFormat.Ply });
+    splatViewer.start();
+  } catch (e) {
+    wrap.innerHTML = "<div style='padding:24px;color:#7d8696'>3D viewer unavailable " +
+      "(renderer CDN unreachable or asset failed to load). The raw scan is served " +
+      "at <code>/assets/splat</code>.</div>";
   }
 }
 
@@ -151,6 +179,16 @@ function renderMap(d) {
     ctx.beginPath(); ctx.arc(cx, cy, r.radius * scale, 0, 7); ctx.stroke();
     const [ax, ay] = T(r.anchor);
     ctx.fillStyle = "#66d98c"; ctx.fillRect(ax - 3, ay - 3, 6, 6);
+  }
+
+  if (on("bearings")) for (const b of (d.bearings || [])) {
+    const [ox, oy] = T(b.origin);
+    const [ex, ey] = T([b.origin[0] + b.direction[0] * b.length_m,
+                        b.origin[1] + b.direction[1] * b.length_m]);
+    ctx.strokeStyle = "rgba(201,162,39,0.6)"; ctx.lineWidth = 1.5;
+    ctx.setLineDash([6, 4]);
+    ctx.beginPath(); ctx.moveTo(ox, oy); ctx.lineTo(ex, ey); ctx.stroke();
+    ctx.setLineDash([]);
   }
 
   if (on("presence") && d.presence) {
@@ -257,14 +295,15 @@ function render() {
 }
 
 async function tick() {
+  if (state.view === "3d") return;
   try {
     const url = state.view === "map" ? "/overlay/map" : `/overlay/camera/${state.view}`;
     const d = await (await fetch(url)).json();
     state.data = d;
     if (state.view === "map") {
       const cams = d.cameras.map(c => c.sensor_id);
-      if (JSON.stringify(cams) !== JSON.stringify(state.cameras)) {
-        state.cameras = cams; buildTabs();
+      if (JSON.stringify(cams) !== JSON.stringify(state.cameras) || d.splat !== state.splat) {
+        state.cameras = cams; state.splat = d.splat; buildTabs();
       }
       stream.style.display = "none";
       renderPanel(d.items, d.events);

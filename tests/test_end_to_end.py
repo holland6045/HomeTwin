@@ -19,8 +19,11 @@ def test_simulation_locates_all_items():
     assert errors["wallet"] < 1.5
     assert result["snapshot"]["wallet"]["zone"] in ("sofa", "living_room")
 
-    # moving phone still tracked by BLE
-    assert errors["phone"] < 2.0
+    # moving phone: two ray-mode cameras triangulate + BLE refines
+    assert errors["phone"] < 0.5
+    phone_sensors = result["snapshot"]["phone"]["sensors"]
+    assert {"cam-living-a", "cam-living-b"} <= set(phone_sensors)
+    assert any(s.startswith("ble-") for s in phone_sensors)
 
     # tomography saw the person in the living room
     assert result["presence"] is not None

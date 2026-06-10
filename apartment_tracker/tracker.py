@@ -15,7 +15,11 @@ from collections import deque
 
 from apartment_tracker.config import AppConfig
 from apartment_tracker.fusion import FusionEngine
-from apartment_tracker.observations import AreaObservation, RangeObservation
+from apartment_tracker.observations import (
+    AreaObservation,
+    BearingObservation,
+    RangeObservation,
+)
 from apartment_tracker.store import StateStore
 
 log = logging.getLogger("apartment_tracker")
@@ -31,6 +35,7 @@ class Tracker:
         self.presence: dict | None = None
         self.events: deque[dict] = deque(maxlen=EVENT_HISTORY)
         self.last_ranges: dict[tuple[str, str], dict] = {}  # (sensor, item) -> last range
+        self.last_bearings: dict[tuple[str, str], dict] = {}  # (sensor, item) -> last ray
         self._zones: dict[str, str | None] = {}
         self._stop = threading.Event()
         self._lock = threading.Lock()
@@ -81,6 +86,12 @@ class Tracker:
                             "anchor": tuple(obs.anchor),
                             "range_m": obs.range_m,
                             "sigma_m": obs.sigma_m,
+                            "timestamp": obs.timestamp,
+                        }
+                    elif isinstance(obs, BearingObservation):
+                        self.last_bearings[(obs.sensor_id, applied)] = {
+                            "origin": tuple(obs.origin),
+                            "direction": tuple(obs.direction),
                             "timestamp": obs.timestamp,
                         }
                 elif isinstance(obs, AreaObservation):

@@ -9,6 +9,8 @@ ESP32, RP2040 W, a phone, another process. One line per message:
    "anchor": [0.0, 4.0, 2.2], "range_m": 2.1, "sigma_m": 0.9}
   {"type": "rssi", "sensor_id": "esp32-hall", "mac": "AA:BB:CC:DD:EE:FF",
    "anchor": [0.0, 4.0, 2.2], "rssi": -67}
+  {"type": "bearing", "sensor_id": "esp32-cam-2", "item": "aruco:7",
+   "origin": [0.2, 0.2, 2.4], "direction": [0.6, 0.6, -0.5], "sigma_rad": 0.03}
   {"type": "area", "sensor_id": "rti-mesh", "label": "presence",
    "centroid": [2.0, 2.0, 1.0], "sigma_m": 1.5}
 
@@ -27,6 +29,7 @@ from collections import deque
 
 from apartment_tracker.observations import (
     AreaObservation,
+    BearingObservation,
     Observation,
     PositionObservation,
     RangeObservation,
@@ -63,6 +66,17 @@ def parse_message(msg: dict, default_sensor: str, model: PathLossModel) -> Obser
         common["item_id"] = common["item_id"] or f"ble:{msg['mac'].upper()}"
         return RangeObservation(
             **common, anchor=tuple(msg["anchor"]), range_m=d, sigma_m=model.range_sigma(d)
+        )
+    if kind == "bearing":
+        d = msg["direction"]
+        n = (d[0] ** 2 + d[1] ** 2 + d[2] ** 2) ** 0.5
+        if n < 1e-9:
+            return None
+        return BearingObservation(
+            **common,
+            origin=tuple(msg["origin"]),
+            direction=(d[0] / n, d[1] / n, d[2] / n),
+            sigma_rad=float(msg.get("sigma_rad", 0.02)),
         )
     if kind == "area":
         return AreaObservation(
