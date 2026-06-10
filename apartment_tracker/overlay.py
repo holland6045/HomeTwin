@@ -76,17 +76,27 @@ def map_overlay(tracker) -> dict:
                 "age_s": round(now - b["timestamp"], 1),
             }
         )
+    trails = [
+        {
+            "item_id": item_id,
+            "points": [p["pos"] for p in list(trail)[-100:]],
+        }
+        for item_id, trail in tracker.trails.items()
+        if len(trail) >= 2
+    ]
     return {
         "timestamp": now,
         "zones": zones,
         "items": items,
         "rings": rings,
         "bearings": bearings,
+        "trails": trails,
         "heatmaps": heatmaps,
         "cameras": cameras,
         "presence": tracker.presence,
         "events": list(tracker.events)[-20:],
         "splat": bool(getattr(tracker.cfg, "splat_asset", None)),
+        "splat_transform": getattr(tracker.cfg, "splat_transform", None),
     }
 
 
@@ -192,6 +202,14 @@ def camera_overlay(tracker, sensor_id: str) -> dict | None:
         for seg in _project_polyline(geo, outline):
             zones.append({"name": zone.name, "points": seg})
 
+    trails = []
+    for item_id, trail in tracker.trails.items():
+        if len(trail) < 2:
+            continue
+        points = [tuple(p["pos"]) for p in list(trail)[-100:]]
+        for seg in _project_polyline(geo, points):
+            trails.append({"item_id": item_id, "points": seg})
+
     presence = None
     if tracker.presence:
         pix = geo.world_to_pixel(tuple(tracker.presence["centroid"]))
@@ -210,6 +228,7 @@ def camera_overlay(tracker, sensor_id: str) -> dict | None:
         "items": items,
         "heat": heat,
         "rings": rings,
+        "trails": trails,
         "zones": zones,
         "presence": presence,
     }

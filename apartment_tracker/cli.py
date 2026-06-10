@@ -103,6 +103,50 @@ def cmd_train(args) -> int:
     return 0
 
 
+def cmd_calibrate_cameras(args) -> int:
+    import yaml
+
+    from apartment_tracker.calibration import calibrate_cameras
+
+    with open(args.pairs, encoding="utf-8") as f:
+        pairs = yaml.safe_load(f)
+    result = calibrate_cameras(
+        args.colmap, pairs, image_names=args.images or None, up_axis=args.up
+    )
+    align = result["alignment"]
+    print(
+        f"# alignment: scale={align['scale']:.4f} yaw={align['yaw_deg']:.2f}deg "
+        f"residual={align['residual_m']:.3f}m",
+        file=sys.stderr,
+    )
+    if align["residual_m"] > 0.15:
+        print("# WARNING: alignment residual > 0.15 m — check reference points", file=sys.stderr)
+    for cam in result["cameras"]:
+        if abs(cam["roll_deg"]) > 5.0:
+            print(
+                f"# WARNING: {cam['image']} has {cam['roll_deg']}deg roll; "
+                "the camera model ignores roll — mount it level",
+                file=sys.stderr,
+            )
+        print(f"# from {cam['image']}")
+        print(
+            yaml.safe_dump(
+                [
+                    {
+                        "type": "camera",
+                        "id": cam["image"].rsplit(".", 1)[0],
+                        "position": cam["position"],
+                        "yaw_deg": cam["yaw_deg"],
+                        "pitch_deg": cam["pitch_deg"],
+                        "hfov_deg": cam["hfov_deg"],
+                    }
+                ],
+                sort_keys=False,
+            )
+        )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     p = argparse.ArgumentParser(prog="apartment-tracker")
@@ -127,6 +171,16 @@ def main(argv: list[str] | None = None) -> int:
 
     plugp = sub.add_parser("plugins", help="list available plugins")
     plugp.set_defaults(fn=cmd_plugins)
+
+    calp = sub.add_parser(
+        "calibrate-cameras",
+        help="derive camera poses from a COLMAP reconstruction (splat scan)",
+    )
+    calp.add_argument("--colmap", required=True, help="dir containing cameras.txt/images.txt")
+    calp.add_argument("--pairs", required=True, help="YAML list of {colmap: [...], world: [...]}")
+    calp.add_argument("--images", nargs="*", help="snapshot filenames to calibrate (default all)")
+    calp.add_argument("--up", choices=["z", "y"], default="z", help="scan up-axis")
+    calp.set_defaults(fn=cmd_calibrate_cameras)
 
     trainp = sub.add_parser("train", help="run a trainer over a recorded dataset")
     trainp.add_argument("trainer", help="trainer plugin name, e.g. path_loss")

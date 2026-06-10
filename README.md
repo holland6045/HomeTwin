@@ -123,11 +123,23 @@ rendering is client-side canvas, so the core stays dependency-free. Any
 sensor can publish a drawable layer by implementing `overlay()` — the UI
 picks it up without changes.
 
-**3D scan tab (optional):** point `world.splat_asset` at a Gaussian-splat
-scan of the apartment (`.ply` from Polycam/Luma/nerfstudio) and the
-dashboard grows a 3D tab rendering it in WebGL (renderer lazy-loaded
-client-side; the tracker host never pays for it). Viability analysis and
-the recommended scan→calibrate workflow: `docs/gaussian-splatting.md`.
+**Path traces:** the tracker keeps a bounded motion trail per item
+(new point on every ≥0.15 m move); trails render in all three views with
+per-item colors and age fading.
+
+**3D view:** the dashboard's 3D tab renders the full overlay set — item
+markers with uncertainty spheres, trails, BLE rings, camera rays, the
+tomography heat map, zones, presence — as a Three.js scene composited
+*inside* the Gaussian-splat scan of the apartment when
+`world.splat_asset` is configured (aligned via `world.splat_transform`),
+or over a ground grid otherwise. Renderer is lazy-loaded client-side; the
+tracker host never pays for it.
+
+**Camera auto-calibration:** `apartment-tracker calibrate-cameras` derives
+each fixed camera's `position/yaw_deg/pitch_deg/hfov_deg` from the COLMAP
+reconstruction produced by the splat scan — include one snapshot per camera
+in the scan's image set and supply two reference points; no tape measure.
+Details and workflow: `docs/gaussian-splatting.md`.
 
 ### Persistence & history
 
@@ -209,10 +221,11 @@ apartment_tracker/
   detectors/           # aruco, onnx
   training/            # dataset capture + trainer plugins
   config.py            # YAML -> world + items + sensor fleet
-  tracker.py           # poll/fuse orchestrator loop, zone-change events
+  tracker.py           # poll/fuse orchestrator loop, zone events, trails
   store.py             # atomic state persistence across restarts
   overlay.py           # map + per-camera overlay assembly for the UI
-  static/ui.html       # canvas dashboard with per-layer toggles
+  calibration.py       # COLMAP reconstruction -> camera poses
+  static/ui.html       # canvas dashboard + 3D splat view with overlays
   api.py               # stdlib HTTP API + dashboard
   simulate.py          # full synthetic apartment (demo + e2e tests)
   cli.py

@@ -9,6 +9,7 @@ occupancy is queryable even though it fuses into no item track.
 from __future__ import annotations
 
 import logging
+import math
 import threading
 import time
 from collections import deque
@@ -25,6 +26,8 @@ from apartment_tracker.store import StateStore
 log = logging.getLogger("apartment_tracker")
 
 EVENT_HISTORY = 500
+TRAIL_LENGTH = 200
+TRAIL_MIN_STEP_M = 0.15
 
 
 class Tracker:
@@ -36,6 +39,7 @@ class Tracker:
         self.events: deque[dict] = deque(maxlen=EVENT_HISTORY)
         self.last_ranges: dict[tuple[str, str], dict] = {}  # (sensor, item) -> last range
         self.last_bearings: dict[tuple[str, str], dict] = {}  # (sensor, item) -> last ray
+        self.trails: dict[str, deque] = {}  # item -> recent path points
         self._zones: dict[str, str | None] = {}
         self._stop = threading.Event()
         self._lock = threading.Lock()
@@ -110,6 +114,10 @@ class Tracker:
             track = self.engine.tracks.get(item_id)
             if track is None:
                 continue
+            trail = self.trails.setdefault(item_id, deque(maxlen=TRAIL_LENGTH))
+            pos = track.position
+            if not trail or math.dist(trail[-1]["pos"], pos) >= TRAIL_MIN_STEP_M:
+                trail.append({"t": track.last_update, "pos": list(pos)})
             zone = self.cfg.world.locate(track.position)
             prev = self._zones.get(item_id)
             if item_id in self._zones and zone != prev:

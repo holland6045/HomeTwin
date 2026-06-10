@@ -20,6 +20,7 @@
     border-radius:8px; overflow:hidden; aspect-ratio:4/3; }
   #stream { position:absolute; inset:0; width:100%; height:100%; object-fit:fill; }
   #canvas { position:absolute; inset:0; width:100%; height:100%; }
+  #splat-wrap { display:none; position:absolute; inset:0; }
   aside { flex:0 0 300px; display:flex; flex-direction:column; gap:12px; }
   .card { background:var(--panel); border-radius:8px; padding:12px; }
   .card h2 { margin:0 0 8px; font-size:13px; text-transform:uppercase; letter-spacing:.05em; color:var(--dim); }
@@ -40,7 +41,7 @@
   <div id="view-wrap">
     <img id="stream" alt="" style="display:none">
     <canvas id="canvas"></canvas>
-    <div id="splat-wrap" style="display:none; position:absolute; inset:0;"></div>
+    <div id="splat-wrap"></div>
   </div>
   <aside>
     <div class="card"><h2>Items</h2><div id="item-list"></div></div>
@@ -54,9 +55,11 @@ const LAYERS = [
   ["heat", "Tomography heat", true],
   ["rings", "BLE ranges", true],
   ["bearings", "Camera rays", true],
+  ["trails", "Trails", true],
   ["items", "Items", true],
   ["presence", "Presence", true],
 ];
+const ITEM_COLORS = ["#4ea1ff", "#ff7eb6", "#66d98c", "#c9a227", "#8a7dff", "#ff9d5c"];
 const state = { view: "map", cameras: [], data: null, toggles: {}, splat: false };
 for (const [k, , def] of LAYERS)
   state.toggles[k] = localStorage.getItem("layer:" + k) ?? String(def);
@@ -66,6 +69,10 @@ const ctx = canvas.getContext("2d");
 const stream = document.getElementById("stream");
 
 function on(layer) { return state.toggles[layer] === "true"; }
+function itemColor(d, itemId) {
+  const ids = (d.items || []).map(i => i.item_id);
+  return ITEM_COLORS[Math.max(ids.indexOf(itemId), 0) % ITEM_COLORS.length];
+}
 
 function buildLayerToggles() {
   const el = document.getElementById("layers");
@@ -79,6 +86,7 @@ function buildLayerToggles() {
       state.toggles[key] = String(cb.checked);
       localStorage.setItem("layer:" + key, state.toggles[key]);
       render();
+      if (state.view === "3d" && splat3d && state.data) update3D(state.data);
     };
     lab.append(cb, label);
     el.append(lab);
@@ -88,8 +96,7 @@ function buildLayerToggles() {
 function buildTabs() {
   const el = document.getElementById("tabs");
   el.innerHTML = "";
-  const views = [["map", "Map"], ...state.cameras.map(c => [c, "📷 " + c])];
-  if (state.splat) views.push(["3d", "3D scan"]);
+  const views = [["map", "Map"], ...state.cameras.map(c => [c, "📷 " + c]), ["3d", "🧊 3D"]];
   for (const [id, label] of views) {
     const b = document.createElement("button");
     b.textContent = label;
@@ -99,49 +106,29 @@ function buildTabs() {
   }
 }
 
-/* ---------- 3D Gaussian-splat view (optional asset) ---------- */
-let splatViewer = null;
-function setSplatVisible(show) {
-  document.getElementById("splat-wrap").style.display = show ? "block" : "none";
-  canvas.style.display = show ? "none" : "block";
-  if (show && !splatViewer) initSplat();
-}
-async function initSplat() {
-  const wrap = document.getElementById("splat-wrap");
-  wrap.textContent = "Loading 3D renderer…";
-  try {
-    // renderer loaded on demand from CDN; vendor these two modules locally
-    // for fully offline deployments
-    const GS = await import("https://esm.sh/@mkkellogg/gaussian-splats-3d@0.4.7");
-    wrap.textContent = "";
-    splatViewer = new GS.Viewer({ rootElement: wrap, sharedMemoryForWorkers: false });
-    await splatViewer.addSplatScene("/assets/splat", { format: GS.SceneFormat.Ply });
-    splatViewer.start();
-  } catch (e) {
-    wrap.innerHTML = "<div style='padding:24px;color:#7d8696'>3D viewer unavailable " +
-      "(renderer CDN unreachable or asset failed to load). The raw scan is served " +
-      "at <code>/assets/splat</code>.</div>";
-  }
-}
-
 function heatColor(v, alphaScale = 0.55) {
   const hue = 240 - 240 * v; // blue -> red
   return `hsla(${hue},90%,55%,${(0.15 + 0.85 * v) * alphaScale})`;
 }
 
-/* ---------- map view ---------- */
-function mapTransform(d) {
+function worldBounds(zones) {
   let xmin = 1e9, ymin = 1e9, xmax = -1e9, ymax = -1e9;
-  for (const z of d.zones) {
+  for (const z of zones) {
     xmin = Math.min(xmin, z.min[0]); ymin = Math.min(ymin, z.min[1]);
     xmax = Math.max(xmax, z.max[0]); ymax = Math.max(ymax, z.max[1]);
   }
   if (xmin > xmax) { xmin = 0; ymin = 0; xmax = 10; ymax = 8; }
+  return { xmin, ymin, xmax, ymax };
+}
+
+/* ---------- map view ---------- */
+function mapTransform(d) {
+  const b = worldBounds(d.zones);
   const pad = 30;
-  const sx = (canvas.width - 2 * pad) / (xmax - xmin);
-  const sy = (canvas.height - 2 * pad) / (ymax - ymin);
+  const sx = (canvas.width - 2 * pad) / (b.xmax - b.xmin);
+  const sy = (canvas.height - 2 * pad) / (b.ymax - b.ymin);
   const s = Math.min(sx, sy);
-  return p => [pad + (p[0] - xmin) * s, canvas.height - pad - (p[1] - ymin) * s, s];
+  return p => [pad + (p[0] - b.xmin) * s, canvas.height - pad - (p[1] - b.ymin) * s, s];
 }
 
 function renderMap(d) {
@@ -191,6 +178,19 @@ function renderMap(d) {
     ctx.setLineDash([]);
   }
 
+  if (on("trails")) for (const tr of (d.trails || [])) {
+    const pts = tr.points.map(p => T(p));
+    const col = itemColor(d, tr.item_id);
+    for (let i = 1; i < pts.length; i++) {
+      ctx.strokeStyle = col;
+      ctx.globalAlpha = 0.1 + 0.55 * (i / pts.length);
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(pts[i - 1][0], pts[i - 1][1]);
+      ctx.lineTo(pts[i][0], pts[i][1]); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+
   if (on("presence") && d.presence) {
     const [px, py] = T(d.presence.centroid);
     ctx.fillStyle = "rgba(138,125,255,0.25)";
@@ -212,7 +212,7 @@ function renderMap(d) {
     const stale = it.status === "stale";
     ctx.strokeStyle = stale ? "rgba(224,162,60,0.5)" : "rgba(78,161,255,0.6)";
     ctx.beginPath(); ctx.arc(px, py, Math.max(it.sigma_m * scale, 4), 0, 7); ctx.stroke();
-    ctx.fillStyle = stale ? "#e0a23c" : "#4ea1ff";
+    ctx.fillStyle = stale ? "#e0a23c" : itemColor(d, it.item_id);
     ctx.beginPath(); ctx.arc(px, py, 4, 0, 7); ctx.fill();
     ctx.font = "12px system-ui"; ctx.fillText(it.name, px + 8, py - 6);
   }
@@ -232,6 +232,8 @@ function renderCamera(d) {
 
   if (on("zones")) for (const z of d.zones) drawSeg(z.points, "#39414e", 1, P);
   if (on("rings")) for (const r of d.rings) drawSeg(r.points, "rgba(102,217,140,0.55)", 1.5, P);
+  if (on("trails")) for (const tr of (d.trails || []))
+    drawSeg(tr.points, "rgba(255,126,182,0.6)", 2, P);
 
   if (on("presence") && d.presence) {
     const [x, y] = P([d.presence.u, d.presence.v]);
@@ -260,6 +262,216 @@ function drawSeg(points, color, width, P) {
   ctx.stroke();
 }
 
+/* ---------- 3D view: overlays inside the Gaussian-splat scene ---------- */
+let splat3d = null; // { THREE, group }
+
+function setSplatVisible(show) {
+  document.getElementById("splat-wrap").style.display = show ? "block" : "none";
+  canvas.style.display = show ? "none" : "block";
+  stream.style.display = "none";
+  if (show && !splat3d) initSplat();
+}
+
+async function initSplat() {
+  const wrap = document.getElementById("splat-wrap");
+  wrap.textContent = "Loading 3D renderer…";
+  try {
+    // lazy-loaded from CDN; vendor these modules locally for offline use
+    const THREE = await import("https://esm.sh/three@0.160.0");
+    const scene = new THREE.Scene();
+    const group = new THREE.Group();
+    scene.add(group);
+    scene.add(new THREE.AmbientLight(0xffffff, 1.2));
+
+    const b = worldBounds(state.data ? state.data.zones : []);
+    const cx = (b.xmin + b.xmax) / 2, cy = (b.ymin + b.ymax) / 2;
+    const span = Math.max(b.xmax - b.xmin, b.ymax - b.ymin, 6);
+    const camPos = [cx, b.ymin - span * 0.4, span * 0.9];
+    const lookAt = [cx, cy, 0.6];
+
+    wrap.textContent = "";
+    if (state.splat) {
+      const GS = await import(
+        "https://esm.sh/@mkkellogg/gaussian-splats-3d@0.4.7?deps=three@0.160.0"
+      );
+      const viewer = new GS.Viewer({
+        rootElement: wrap,
+        threeScene: scene,
+        cameraUp: [0, 0, 1],
+        initialCameraPosition: camPos,
+        initialCameraLookAt: lookAt,
+        sharedMemoryForWorkers: false,
+      });
+      const t = (state.data && state.data.splat_transform) || null;
+      const opts = {};
+      if (t) {
+        if (t.position) opts.position = t.position;
+        if (t.scale) opts.scale = [t.scale, t.scale, t.scale];
+        if (t.rotation_deg) {
+          const e = new THREE.Euler(...t.rotation_deg.map(x => x * Math.PI / 180));
+          const q = new THREE.Quaternion().setFromEuler(e);
+          opts.rotation = [q.x, q.y, q.z, q.w];
+        }
+      }
+      await viewer.addSplatScene("/assets/splat", opts);
+      viewer.start();
+    } else {
+      // no scan configured: plain 3D world view with a ground grid
+      const { OrbitControls } = await import(
+        "https://esm.sh/three@0.160.0/examples/jsm/controls/OrbitControls.js?deps=three@0.160.0"
+      );
+      const grid = new THREE.GridHelper(span * 1.5, 30, 0x39414e, 0x262c35);
+      grid.rotation.x = Math.PI / 2;
+      grid.position.set(cx, cy, 0);
+      scene.add(grid);
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(wrap.clientWidth, wrap.clientHeight);
+      wrap.appendChild(renderer.domElement);
+      const cam = new THREE.PerspectiveCamera(60, wrap.clientWidth / wrap.clientHeight, 0.1, 200);
+      cam.up.set(0, 0, 1);
+      cam.position.set(...camPos);
+      const controls = new OrbitControls(cam, renderer.domElement);
+      controls.target.set(...lookAt);
+      (function loop() {
+        requestAnimationFrame(loop);
+        controls.update();
+        renderer.render(scene, cam);
+      })();
+    }
+    splat3d = { THREE, group };
+    if (state.data) update3D(state.data);
+  } catch (e) {
+    wrap.innerHTML = "<div style='padding:24px;color:#7d8696'>3D viewer unavailable " +
+      "(renderer CDN unreachable or asset failed to load). The raw scan is served " +
+      "at <code>/assets/splat</code>.</div>";
+  }
+}
+
+function makeLabel(THREE, text, color) {
+  const c = document.createElement("canvas");
+  c.width = 256; c.height = 64;
+  const g = c.getContext("2d");
+  g.font = "32px system-ui"; g.fillStyle = color || "#d9dee7";
+  g.shadowColor = "#000"; g.shadowBlur = 6;
+  g.fillText(text, 8, 42);
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: new THREE.CanvasTexture(c), depthTest: false, transparent: true,
+  }));
+  sprite.scale.set(1.0, 0.25, 1);
+  return sprite;
+}
+
+function line3(THREE, points, color, opacity = 1, dashed = false) {
+  const geo = new THREE.BufferGeometry().setFromPoints(
+    points.map(p => new THREE.Vector3(p[0], p[1], p[2] ?? 0)));
+  const mat = dashed
+    ? new THREE.LineDashedMaterial({ color, transparent: true, opacity, dashSize: 0.15, gapSize: 0.1 })
+    : new THREE.LineBasicMaterial({ color, transparent: true, opacity });
+  const line = new THREE.Line(geo, mat);
+  if (dashed) line.computeLineDistances();
+  return line;
+}
+
+function update3D(d) {
+  if (!splat3d) return;
+  const { THREE, group } = splat3d;
+  for (const child of [...group.children]) {
+    group.remove(child);
+    child.traverse?.(o => { o.geometry?.dispose(); o.material?.map?.dispose(); o.material?.dispose(); });
+  }
+
+  if (on("zones")) for (const z of d.zones) {
+    const size = [0, 1, 2].map(i => z.max[i] - z.min[i]);
+    const box = new THREE.LineSegments(
+      new THREE.EdgesGeometry(new THREE.BoxGeometry(...size)),
+      new THREE.LineBasicMaterial({ color: 0x39414e, transparent: true, opacity: 0.7 }));
+    box.position.set(...[0, 1, 2].map(i => (z.min[i] + z.max[i]) / 2));
+    group.add(box);
+  }
+
+  if (on("heat")) for (const h of d.heatmaps) {
+    if (!h.values) continue;
+    const verts = [], colors = [], cell = h.cell_m, z = h.height_m;
+    const col = new THREE.Color();
+    for (let iy = 0; iy < h.values.length; iy++)
+      for (let ix = 0; ix < h.values[iy].length; ix++) {
+        const v = h.values[iy][ix];
+        if (v < 0.05) continue;
+        const x0 = h.bounds[0] + ix * cell, y0 = h.bounds[1] + iy * cell;
+        col.setHSL((240 - 240 * v) / 360, 0.9, 0.55);
+        const quad = [[x0, y0], [x0 + cell, y0], [x0 + cell, y0 + cell], [x0, y0 + cell]];
+        for (const idx of [0, 1, 2, 0, 2, 3]) {
+          verts.push(quad[idx][0], quad[idx][1], z);
+          colors.push(col.r, col.g, col.b);
+        }
+      }
+    if (verts.length) {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.Float32BufferAttribute(verts, 3));
+      geo.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+      group.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+        vertexColors: true, transparent: true, opacity: 0.35, side: THREE.DoubleSide,
+        depthWrite: false,
+      })));
+    }
+  }
+
+  if (on("rings")) for (const r of d.rings) {
+    const pts = [];
+    for (let i = 0; i <= 36; i++) {
+      const a = i / 36 * 2 * Math.PI;
+      pts.push([r.cx + r.radius * Math.cos(a), r.cy + r.radius * Math.sin(a), r.z]);
+    }
+    group.add(line3(THREE, pts, 0x66d98c, 0.45));
+  }
+
+  if (on("bearings")) for (const b of (d.bearings || [])) {
+    const end = [0, 1, 2].map(i => b.origin[i] + b.direction[i] * b.length_m);
+    group.add(line3(THREE, [b.origin, end], 0xc9a227, 0.6, true));
+  }
+
+  if (on("trails")) for (const tr of (d.trails || [])) {
+    group.add(line3(THREE, tr.points, new THREE.Color(itemColor(d, tr.item_id)).getHex(), 0.7));
+  }
+
+  if (on("presence") && d.presence) {
+    const s = new THREE.Mesh(
+      new THREE.SphereGeometry(Math.min(d.presence.sigma_m, 1.5), 16, 12),
+      new THREE.MeshBasicMaterial({ color: 0x8a7dff, transparent: true, opacity: 0.18 }));
+    s.position.set(...d.presence.centroid);
+    group.add(s);
+  }
+
+  for (const c of d.cameras) {
+    const cone = new THREE.Mesh(
+      new THREE.ConeGeometry(0.1, 0.3, 12),
+      new THREE.MeshBasicMaterial({ color: 0xc9a227 }));
+    cone.position.set(...c.position);
+    // ConeGeometry's tip points +y; rotate about z so it aims along yaw
+    cone.rotation.z = (c.yaw_deg * Math.PI / 180) - Math.PI / 2;
+    group.add(cone);
+  }
+
+  if (on("items")) for (const it of d.items) {
+    if (!it.position) continue;
+    const stale = it.status === "stale";
+    const color = stale ? 0xe0a23c : new THREE.Color(itemColor(d, it.item_id)).getHex();
+    const dot = new THREE.Mesh(
+      new THREE.SphereGeometry(0.07, 16, 12),
+      new THREE.MeshBasicMaterial({ color }));
+    dot.position.set(...it.position);
+    group.add(dot);
+    const sigma = new THREE.Mesh(
+      new THREE.SphereGeometry(Math.min(Math.max(it.sigma_m, 0.05), 1.2), 16, 12),
+      new THREE.MeshBasicMaterial({ color, wireframe: true, transparent: true, opacity: 0.25 }));
+    sigma.position.set(...it.position);
+    group.add(sigma);
+    const label = makeLabel(THREE, it.name, stale ? "#e0a23c" : "#d9dee7");
+    label.position.set(it.position[0], it.position[1], it.position[2] + 0.3);
+    group.add(label);
+  }
+}
+
 /* ---------- side panel ---------- */
 function renderPanel(items, events) {
   const list = document.getElementById("item-list");
@@ -286,7 +498,7 @@ function renderPanel(items, events) {
 
 /* ---------- main loop ---------- */
 function render() {
-  if (!state.data) return;
+  if (!state.data || state.view === "3d") return;
   const wrap = document.getElementById("view-wrap");
   canvas.width = wrap.clientWidth; canvas.height = wrap.clientHeight;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -295,18 +507,20 @@ function render() {
 }
 
 async function tick() {
-  if (state.view === "3d") return;
   try {
-    const url = state.view === "map" ? "/overlay/map" : `/overlay/camera/${state.view}`;
+    const want3d = state.view === "3d";
+    const url = (state.view === "map" || want3d)
+      ? "/overlay/map" : `/overlay/camera/${state.view}`;
     const d = await (await fetch(url)).json();
     state.data = d;
-    if (state.view === "map") {
+    if (state.view === "map" || want3d) {
       const cams = d.cameras.map(c => c.sensor_id);
       if (JSON.stringify(cams) !== JSON.stringify(state.cameras) || d.splat !== state.splat) {
         state.cameras = cams; state.splat = d.splat; buildTabs();
       }
-      stream.style.display = "none";
       renderPanel(d.items, d.events);
+      if (want3d) { if (splat3d) update3D(d); return; }
+      stream.style.display = "none";
     } else {
       if (d.stream_url) { stream.src = d.stream_url; stream.style.display = "block"; }
       else stream.style.display = "none";

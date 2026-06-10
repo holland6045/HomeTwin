@@ -45,27 +45,48 @@ outputs `.ply`/`.splat` directly).
 
 ## What is implemented today
 
-- `world.splat_asset: scans/apartment.ply` in config.
-- The API serves it at `GET /assets/splat`.
-- The dashboard shows a **3D scan** tab when configured, lazy-loading the
-  `@mkkellogg/gaussian-splats-3d` WebGL renderer from CDN (vendor the module
-  locally for offline use). Rendering cost is paid by the viewing browser,
-  never by the tracker host.
+- `world.splat_asset: scans/apartment.ply` in config, served at
+  `GET /assets/splat`; `world.splat_transform` (position / rotation_deg /
+  scale) aligns the scan to the world frame at render time.
+- The dashboard's **3D tab** lazy-loads the `@mkkellogg/gaussian-splats-3d`
+  WebGL renderer from CDN (vendor the modules locally for offline use) and
+  renders **live tracker state inside the splat**: item markers with
+  uncertainty spheres and labels, motion trails, BLE range rings, camera
+  sight rays, the tomography heat map, presence, zone boxes, and camera
+  poses — all sharing the dashboard's layer toggles. Without a configured
+  splat the same tab renders the overlays over a ground grid. Rendering
+  cost is paid by the viewing browser, never by the tracker host.
+- **Automatic camera calibration** from the scan's COLMAP reconstruction:
+
+  ```bash
+  apartment-tracker calibrate-cameras \
+      --colmap scans/colmap/sparse/0 \
+      --pairs scans/refpoints.yaml \
+      --images cam-kitchen.jpg cam-living-a.jpg
+  ```
+
+  parses `cameras.txt`/`images.txt`, aligns the reconstruction to the world
+  frame from >= 2 reference points (2D similarity + height, gravity-aligned
+  scans; `--up y` converts y-up exports), and prints ready-to-paste camera
+  config (`position/yaw_deg/pitch_deg/hfov_deg`). It warns when alignment
+  residual exceeds 0.15 m or a camera has > 5 deg roll (the pinhole model
+  assumes level mounting). `refpoints.yaml` is a list of
+  `{colmap: [x,y,z], world: [x,y,z]}` correspondences — e.g. two floor
+  ArUco markers you can click in any COLMAP/splat viewer.
 
 ## Recommended workflow
 
 1. Scan the apartment (Polycam/Luma/Scaniverse export, or
-   `ns-train splatfacto` / OpenSplat on a video) → `.ply`.
-2. Align the model to the world frame (same origin/axes as `world.zones`).
-3. Set `world.splat_asset`, open the 3D tab.
-4. (Next step, not yet automated) feed fixed-camera snapshots through the
-   same SfM run and copy the recovered poses into each camera's config.
+   `ns-train splatfacto` / OpenSplat on a video) → `.ply` + COLMAP model.
+   Include a snapshot from each fixed camera in the image set.
+2. Pick >= 2 reference points with known world coordinates, write
+   `refpoints.yaml`.
+3. `apartment-tracker calibrate-cameras ...` → paste camera poses into
+   config; reuse the printed alignment as `world.splat_transform`.
+4. Set `world.splat_asset`, open the 3D tab: live items inside your room.
 
 ## Future work
 
-- Automated camera-pose import from a COLMAP reconstruction
-  (`images.txt` → camera `position/yaw_deg/pitch_deg`).
-- Item markers rendered inside the 3D view at fused world coordinates
-  (the viewer already has the world-frame scene; this is a small JS step).
 - Splat-rendered synthetic views as training data for the ONNX detector
   (domain-matched backgrounds for your exact apartment).
+- Click-to-measure reference-point picking inside the dashboard's 3D view.

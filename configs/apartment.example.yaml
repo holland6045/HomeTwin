@@ -2,9 +2,13 @@
 # World frame: meters, z up, origin at a chosen apartment corner.
 
 world:
-  # optional Gaussian-splat scan (.ply/.splat) shown in the dashboard's 3D
-  # tab; see docs/gaussian-splatting.md
+  # optional Gaussian-splat scan (.ply/.splat): the dashboard's 3D tab
+  # renders live item markers, trails, and sensor overlays inside it.
+  # Calibrate camera poses from the same scan with:
+  #   apartment-tracker calibrate-cameras --colmap <dir> --pairs refpoints.yaml
+  # See docs/gaussian-splatting.md.
   # splat_asset: scans/apartment.ply
+  # splat_transform: {position: [0, 0, 0], rotation_deg: [0, 0, 0], scale: 1.0}
   zones:
     - {name: living_room,     min: [0, 0, 0],        max: [5, 4, 2.6]}
     - {name: kitchen,         min: [5, 0, 0],        max: [8, 4, 2.6]}
