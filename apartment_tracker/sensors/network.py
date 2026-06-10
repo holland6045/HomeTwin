@@ -17,15 +17,25 @@ ESP32, RP2040 W, a phone, another process. One line per message:
 Timestamps are assigned on receipt; MCU clocks are never trusted. Malformed
 lines are dropped and counted, never fatal — a flaky node must not take the
 tracker down.
+
+Security: with `auth_token` set, the first line of every connection must be
+{"auth": "<token>"} or the connection is closed — one constant-time check
+per connection, zero per-message cost (ESP32-friendly). Lines are capped at
+64 KiB so a misbehaving peer cannot balloon memory. The transport is plain
+TCP: run it on a trusted/segmented IoT network; for hostile networks put
+the nodes behind a WireGuard/TLS tunnel rather than per-message crypto.
 """
 
 from __future__ import annotations
 
+import hmac
 import json
 import socketserver
 import threading
 import time
 from collections import deque
+
+MAX_LINE = 64 * 1024
 
 from apartment_tracker.observations import (
     AreaObservation,
@@ -95,15 +105,27 @@ class NetworkBridgeSensor(SensorAdapter):
         tx_power: float = -59.0,
         exponent: float = 2.7,
         max_queue: int = 10000,
+        auth_token: str | None = None,
     ):
         super().__init__(sensor_id)
         self.host, self.port = host, port
         self.model = PathLossModel(tx_power, exponent)
+        self.auth_token = auth_token
         self._queue: deque[Observation] = deque(maxlen=max_queue)
         self._lock = threading.Lock()
         self._server: socketserver.ThreadingTCPServer | None = None
         self._thread: threading.Thread | None = None
         self.dropped = 0
+        self.rejected_connections = 0
+
+    def check_auth(self, line: str) -> bool:
+        try:
+            presented = json.loads(line).get("auth", "")
+        except (json.JSONDecodeError, AttributeError):
+            return False
+        return isinstance(presented, str) and hmac.compare_digest(
+            self.auth_token, presented
+        )
 
     def handle_line(self, line: str) -> None:
         try:
@@ -122,10 +144,26 @@ class NetworkBridgeSensor(SensorAdapter):
 
         class Handler(socketserver.StreamRequestHandler):
             def handle(self) -> None:
-                for raw in self.rfile:
+                authed = bridge.auth_token is None
+                while True:
+                    raw = self.rfile.readline(MAX_LINE + 1)
+                    if not raw:
+                        return
+                    if len(raw) > MAX_LINE:
+                        bridge.dropped += 1
+                        if not authed:
+                            return  # oversized pre-auth garbage: hang up
+                        continue
                     line = raw.decode("utf-8", errors="replace").strip()
-                    if line:
-                        bridge.handle_line(line)
+                    if not line:
+                        continue
+                    if not authed:
+                        if not bridge.check_auth(line):
+                            bridge.rejected_connections += 1
+                            return
+                        authed = True
+                        continue
+                    bridge.handle_line(line)
 
         socketserver.ThreadingTCPServer.allow_reuse_address = True
         self._server = socketserver.ThreadingTCPServer((self.host, self.port), Handler)

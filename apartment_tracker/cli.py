@@ -5,8 +5,16 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 import urllib.request
+
+TOKEN_ENV = "APARTMENT_TRACKER_TOKEN"
+
+
+def _auth_headers(args) -> dict:
+    token = getattr(args, "token", None) or os.environ.get(TOKEN_ENV)
+    return {"Authorization": f"Bearer {token}"} if token else {}
 
 
 def cmd_run(args) -> int:
@@ -31,7 +39,8 @@ def cmd_run(args) -> int:
 def cmd_where(args) -> int:
     url = f"http://{args.host}:{args.port}/items/{urllib.parse.quote(args.item)}"
     try:
-        with urllib.request.urlopen(url, timeout=5) as resp:
+        req = urllib.request.Request(url, headers=_auth_headers(args))
+        with urllib.request.urlopen(req, timeout=5) as resp:
             entry = json.loads(resp.read())
     except urllib.error.HTTPError as e:
         print(f"unknown item {args.item!r}" if e.code == 404 else f"error: {e}", file=sys.stderr)
@@ -111,7 +120,7 @@ def cmd_update_splat(args) -> int:
         f"{base}/assets/splat",
         data=data,
         method="POST",
-        headers={"Content-Type": "application/octet-stream"},
+        headers={"Content-Type": "application/octet-stream", **_auth_headers(args)},
     )
     with urllib.request.urlopen(req, timeout=args.timeout) as resp:
         print(resp.read().decode())
@@ -120,7 +129,7 @@ def cmd_update_splat(args) -> int:
             f"{base}/assets/splat/transform",
             data=args.transform.encode(),
             method="POST",
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json", **_auth_headers(args)},
         )
         with urllib.request.urlopen(treq, timeout=10) as resp:
             print(resp.read().decode())
@@ -226,6 +235,7 @@ def main(argv: list[str] | None = None) -> int:
     wherep.add_argument("item")
     wherep.add_argument("--host", default="127.0.0.1")
     wherep.add_argument("--port", type=int, default=8080)
+    wherep.add_argument("--token", help=f"API token (or set ${TOKEN_ENV})")
     wherep.set_defaults(fn=cmd_where)
 
     simp = sub.add_parser("simulate", help="run the synthetic apartment demo")
@@ -254,6 +264,7 @@ def main(argv: list[str] | None = None) -> int:
     upsp.add_argument("--port", type=int, default=8080)
     upsp.add_argument("--transform", help='JSON splat_transform, e.g. \'{"scale": 1.8}\'')
     upsp.add_argument("--timeout", type=int, default=300)
+    upsp.add_argument("--token", help=f"admin API token (or set ${TOKEN_ENV})")
     upsp.set_defaults(fn=cmd_update_splat)
 
     capp = sub.add_parser(

@@ -4,6 +4,7 @@ sensor fleet. See configs/apartment.example.yaml.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -24,12 +25,36 @@ class AppConfig:
     stale_after_s: float = 300.0
     api_host: str = "127.0.0.1"
     api_port: int = 8080
+    api_tokens: list[dict] = field(default_factory=list)  # [{token, role}]
     dataset_dir: str = "dataset"
     state_path: str | None = None
     save_interval_s: float = 30.0
     splat_asset: str | None = None  # .splat/.ply scan rendered by the dashboard's 3D tab
     splat_transform: dict | None = None  # aligns the scan to the world frame
     raw: dict = field(default_factory=dict)
+
+
+def resolve_tokens(auth_cfg: dict | None) -> list[dict]:
+    """Token specs -> [{token, role}]. A spec provides the secret as a
+    literal `token`, an `env` var name, or a `file` path (0600 recommended).
+    """
+    out = []
+    for spec in (auth_cfg or {}).get("tokens", []):
+        if "token" in spec:
+            secret = str(spec["token"])
+        elif "env" in spec:
+            secret = os.environ.get(spec["env"], "")
+            if not secret:
+                raise ValueError(f"auth token env var {spec['env']!r} is empty or unset")
+        elif "file" in spec:
+            secret = Path(spec["file"]).read_text(encoding="utf-8").strip()
+        else:
+            raise ValueError(f"auth token spec needs token/env/file: {spec}")
+        role = spec.get("role", "admin")
+        if role not in ("viewer", "admin"):
+            raise ValueError(f"unknown auth role {role!r}")
+        out.append({"token": secret, "role": role})
+    return out
 
 
 def build_sensor(cfg: dict) -> SensorAdapter:
@@ -58,6 +83,7 @@ def load_config(path: str | Path) -> AppConfig:
         stale_after_s=float(tracker.get("stale_after_s", 300.0)),
         api_host=api.get("host", "127.0.0.1"),
         api_port=int(api.get("port", 8080)),
+        api_tokens=resolve_tokens(api.get("auth")),
         dataset_dir=tracker.get("dataset_dir", "dataset"),
         state_path=tracker.get("state_path"),
         save_interval_s=float(tracker.get("save_interval_s", 30.0)),

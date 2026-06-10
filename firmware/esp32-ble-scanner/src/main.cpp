@@ -28,7 +28,11 @@ static void ensureLinks() {
     uint32_t now = millis();
     if (!client.connected() && now - lastConnectAttempt > 2000) {
         lastConnectAttempt = now;
-        client.connect(TRACKER_HOST, TRACKER_PORT);
+        if (client.connect(TRACKER_HOST, TRACKER_PORT)) {
+#ifdef BRIDGE_TOKEN
+            client.print("{\"auth\":\"" BRIDGE_TOKEN "\"}\n");
+#endif
+        }
     }
 }
 

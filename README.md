@@ -210,6 +210,23 @@ The system is calibrated/retrained from recorded data, per modality:
 4. RF tomography recalibrates in-place (`calibrate()` re-baselines link RSS
    after furniture moves).
 
+### Security
+
+Full model in `docs/security.md`. Designed to cost one constant-time
+comparison per request or connection — fusion and polling are untouched
+(measured: auth overhead below request-latency noise).
+
+- **API**: bearer tokens with `viewer` (read) and `admin` (read+write)
+  roles; secrets from env vars or 0600 files, never config literals.
+  The dashboard prompts for a token on first 401 and remembers it.
+  With no tokens configured, reads stay open but writes are loopback-only.
+- **MCU bridge**: optional connection-level shared secret (first line
+  `{"auth": "..."}`), 64 KiB line cap, host-side timestamps so nodes
+  can't poison history. Plain TCP by design — segment the IoT VLAN or
+  tunnel via WireGuard for hostile networks.
+- **TLS**: deliberately delegated to a reverse proxy (caddy/nginx) in
+  front of the localhost-bound API.
+
 ## Repository layout
 
 ```

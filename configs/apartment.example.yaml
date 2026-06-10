@@ -84,6 +84,9 @@ sensors:
     port: 8787
     tx_power: -59.0
     exponent: 2.7
+    # nodes must send {"auth": "<token>"} as their first line (one check per
+    # connection — no per-message cost). Omit only on a trusted IoT VLAN.
+    # auth_token: "change-me-bridge-secret"
 
 tracker:
   poll_hz: 10
@@ -95,3 +98,10 @@ tracker:
 api:
   host: 127.0.0.1
   port: 8080
+  # Bearer-token auth: viewer = read-only (dashboards), admin = read+write
+  # (tagging, splat upload). Without tokens, reads are open and writes are
+  # loopback-only. Secrets come from env/file — never commit literals.
+  # auth:
+  #   tokens:
+  #     - {env: TRACKER_ADMIN_TOKEN, role: admin}
+  #     - {file: /etc/apartment-tracker/viewer.token, role: viewer}

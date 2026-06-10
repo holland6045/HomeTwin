@@ -12,33 +12,90 @@ POST /items/<id>/tags  -> {"tag": "ble:AA:.."} manual tagging at runtime
 POST /assets/splat     -> replace the splat scan (raw body); atomic, no restart
 POST /assets/splat/transform -> update world.splat_transform at runtime
 
-The API binds to 127.0.0.1 by default; the splat upload endpoint is
-unauthenticated, so put a reverse proxy with auth in front before exposing
-it beyond localhost.
+Authentication (`api.auth.tokens` in config): bearer tokens with two roles.
+`viewer` reads, `admin` reads and writes. One constant-time comparison per
+request — no measurable overhead. With no tokens configured the API stays
+open for reads but restricts writes to loopback peers. `/` and `/health`
+are always served (the dashboard loads, then prompts for a token on the
+first 401). GET requests also accept `?token=` for clients that cannot set
+headers (the splat viewer); avoid it for admin tokens — query strings end
+up in logs. TLS belongs in a reverse proxy (caddy/nginx), not in-process.
 """
 
 from __future__ import annotations
 
+import hmac
 import json
 import os
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 from pathlib import Path
-from urllib.parse import unquote
+from urllib.parse import parse_qs, unquote, urlsplit
 
 from apartment_tracker.overlay import camera_overlay, map_overlay
 from apartment_tracker.tracker import Tracker
 
 UPLOAD_CHUNK = 1 << 20
+MAX_UPLOAD = 2 << 30  # splat scans are large, but bound the write anyway
+LOOPBACK = ("127.0.0.1", "::1")
+
+
+class AuthPolicy:
+    def __init__(self, tokens: list[dict] | None):
+        self._tokens = [(t["token"], t.get("role", "admin")) for t in (tokens or [])]
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self._tokens)
+
+    def role(self, presented: str | None) -> str | None:
+        if not presented:
+            return None
+        granted = None
+        for secret, role in self._tokens:  # check all: no early-exit timing signal
+            if hmac.compare_digest(secret, presented):
+                granted = role
+        return granted
 
 
 def _ui_html() -> bytes:
     return (resources.files("apartment_tracker") / "static" / "ui.html").read_bytes()
 
 
-def make_handler(tracker: Tracker):
+def make_handler(tracker: Tracker, policy: AuthPolicy):
     class Handler(BaseHTTPRequestHandler):
+        def _presented_token(self) -> str | None:
+            auth = self.headers.get("Authorization", "")
+            if auth.startswith("Bearer "):
+                return auth[7:].strip()
+            qs = parse_qs(urlsplit(self.path).query)
+            return qs["token"][0] if "token" in qs else None
+
+        def _authorize(self, write: bool) -> bool:
+            if not policy.enabled:
+                if write and self.client_address[0] not in LOOPBACK:
+                    self._send(
+                        403,
+                        {"error": "writes restricted to localhost (no auth configured)"},
+                    )
+                    return False
+                return True
+            role = policy.role(self._presented_token())
+            if role is None:
+                body = json.dumps({"error": "authentication required"}).encode()
+                self.send_response(401)
+                self.send_header("WWW-Authenticate", 'Bearer realm="apartment-tracker"')
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return False
+            if write and role != "admin":
+                self._send(403, {"error": "admin token required"})
+                return False
+            return True
+
         def _send(self, code: int, payload) -> None:
             body = json.dumps(payload).encode()
             self.send_response(code)
@@ -56,7 +113,13 @@ def make_handler(tracker: Tracker):
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
-            elif parts == ["assets", "splat"]:
+                return
+            if parts == ["health"]:
+                self._send(200, {"status": "ok", "sensors": len(tracker.sensors)})
+                return
+            if not self._authorize(write=False):
+                return
+            if parts == ["assets", "splat"]:
                 path = getattr(tracker.cfg, "splat_asset", None)
                 try:
                     with open(path, "rb") as f:
@@ -74,8 +137,6 @@ def make_handler(tracker: Tracker):
             elif len(parts) == 3 and parts[:2] == ["overlay", "camera"]:
                 data = camera_overlay(tracker, parts[2])
                 self._send(200, data) if data else self._send(404, {"error": "unknown camera"})
-            elif parts == ["health"]:
-                self._send(200, {"status": "ok", "sensors": len(tracker.sensors)})
             elif parts == ["items"]:
                 self._send(200, tracker.snapshot())
             elif len(parts) == 2 and parts[0] == "items":
@@ -90,6 +151,8 @@ def make_handler(tracker: Tracker):
 
         def do_POST(self) -> None:
             parts = [unquote(p) for p in self.path.split("?")[0].split("/") if p]
+            if not self._authorize(write=True):
+                return
             if parts == ["assets", "splat"]:
                 path = getattr(tracker.cfg, "splat_asset", None)
                 if not path:
@@ -98,6 +161,9 @@ def make_handler(tracker: Tracker):
                 length = int(self.headers.get("Content-Length", 0))
                 if length <= 0:
                     self._send(400, {"error": "empty body"})
+                    return
+                if length > MAX_UPLOAD:
+                    self._send(413, {"error": "upload too large"})
                     return
                 dest = Path(path)
                 dest.parent.mkdir(parents=True, exist_ok=True)
@@ -148,7 +214,8 @@ def make_handler(tracker: Tracker):
 
 class ApiServer:
     def __init__(self, tracker: Tracker, host: str = "127.0.0.1", port: int = 8080):
-        self._server = ThreadingHTTPServer((host, port), make_handler(tracker))
+        policy = AuthPolicy(getattr(tracker.cfg, "api_tokens", None))
+        self._server = ThreadingHTTPServer((host, port), make_handler(tracker, policy))
         self.port = self._server.server_address[1]
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
 

@@ -69,6 +69,28 @@ const ctx = canvas.getContext("2d");
 const stream = document.getElementById("stream");
 
 function on(layer) { return state.toggles[layer] === "true"; }
+
+/* ---------- auth: prompt once on 401, remember the token ---------- */
+function authHeaders() {
+  const t = localStorage.getItem("api_token");
+  return t ? { "Authorization": "Bearer " + t } : {};
+}
+async function authFetch(url) {
+  let r = await fetch(url, { headers: authHeaders() });
+  if (r.status === 401) {
+    const t = prompt("API token required:");
+    if (t) {
+      localStorage.setItem("api_token", t.trim());
+      r = await fetch(url, { headers: authHeaders() });
+    }
+  }
+  return r;
+}
+function assetUrl(path) {
+  // the splat viewer fetches the URL itself and cannot set headers
+  const t = localStorage.getItem("api_token");
+  return t ? `${path}?token=${encodeURIComponent(t)}` : path;
+}
 function itemColor(d, itemId) {
   const ids = (d.items || []).map(i => i.item_id);
   return ITEM_COLORS[Math.max(ids.indexOf(itemId), 0) % ITEM_COLORS.length];
@@ -313,7 +335,7 @@ async function initSplat() {
           opts.rotation = [q.x, q.y, q.z, q.w];
         }
       }
-      await viewer.addSplatScene("/assets/splat", opts);
+      await viewer.addSplatScene(assetUrl("/assets/splat"), opts);
       viewer.start();
     } else {
       // no scan configured: plain 3D world view with a ground grid
@@ -511,7 +533,7 @@ async function tick() {
     const want3d = state.view === "3d";
     const url = (state.view === "map" || want3d)
       ? "/overlay/map" : `/overlay/camera/${state.view}`;
-    const d = await (await fetch(url)).json();
+    const d = await (await authFetch(url)).json();
     state.data = d;
     if (state.view === "map" || want3d) {
       const cams = d.cameras.map(c => c.sensor_id);
@@ -533,7 +555,7 @@ async function tick() {
     } else {
       if (d.stream_url) { stream.src = d.stream_url; stream.style.display = "block"; }
       else stream.style.display = "none";
-      const map = await (await fetch("/overlay/map")).json();
+      const map = await (await authFetch("/overlay/map")).json();
       renderPanel(map.items, map.events);
     }
     render();
