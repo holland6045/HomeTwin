@@ -1,0 +1,181 @@
+# Apartment Tracker
+
+Modular CV + sensor-fusion system that answers one question: **where are my
+keys / wallet / phone right now?**
+
+It fuses whatever sensing you have — cameras, BLE beacons, RF tomography
+meshes, MCU sensor nodes — into a single per-item position estimate with a
+zone name ("kitchen counter"), an uncertainty radius, and a freshness age.
+The core is pure Python (stdlib + PyYAML), so it runs on a laptop, a
+Raspberry Pi, or any always-on box; hardware support is plugins all the way
+down.
+
+```
+┌─────────────┐  ┌─────────────┐  ┌──────────────┐  ┌─────────────────┐
+│ camera +     │  │ BLE scanner │  │ RF tomography│  │ MCU nodes (ESP32,│
+│ detector     │  │ (RSSI)      │  │ link mesh    │  │ RP2040, ...)     │
+└──────┬──────┘  └──────┬──────┘  └──────┬───────┘  └──────┬──────────┘
+       │ Position        │ Range          │ Area            │ JSON lines/TCP
+       ▼                 ▼                ▼                  ▼
+   ┌────────────────────────────────────────────────────────────┐
+   │            Observation stream (3 canonical shapes)         │
+   └──────────────────────────────┬─────────────────────────────┘
+                                  ▼
+                  ┌────────────────────────────────┐
+                  │ Fusion engine: per-item Kalman │
+                  │ filter (EKF for ranges),       │
+                  │ identity + gating, multilater- │
+                  │ ation init, staleness          │
+                  └───────────────┬────────────────┘
+                                  ▼
+                  ┌────────────────────────────────┐
+                  │ World model (zones) + HTTP API │
+                  │ "wallet: sofa, ±0.3 m, 12s ago"│
+                  └────────────────────────────────┘
+```
+
+## Quick start
+
+```bash
+pip install -e .            # core: stdlib + PyYAML only
+pip install -e .[vision]    # optional: OpenCV cameras + ArUco
+pip install -e .[ml]        # optional: ONNX object detection
+
+# zero-hardware demo: synthetic apartment with all three modalities
+apartment-tracker simulate
+
+# real deployment
+apartment-tracker run -c configs/apartment.example.yaml
+apartment-tracker where keys
+# -> House keys: kitchen_counter at (6.5, 1.0, 0.9) ±0.06 m, seen 2.0s ago via cam-kitchen
+
+apartment-tracker plugins   # list everything installed
+```
+
+Run the tests with `pytest` (44 tests, no hardware or heavy deps needed).
+
+## Design
+
+### Hardware agnosticism: three canonical observations
+
+Every sensing modality reduces to one of three shapes before fusion
+(`apartment_tracker/observations.py`):
+
+| Shape | Carries | Produced by |
+|---|---|---|
+| `PositionObservation` | 3D fix + sigma | camera+detector, UWB, anything with geometry |
+| `RangeObservation` | distance from a known anchor | BLE RSSI, UWB, acoustic ranging |
+| `AreaObservation` | diffuse centroid + spread | RF tomography, PIR zones, pressure mats |
+
+The fusion engine only knows these shapes. Adding a sensing modality never
+touches fusion code.
+
+### Identity: items and tags
+
+Items are registered once; tags map sensor-level identities onto them —
+`aruco:7`, `ble:AA:BB:CC:DD:EE:FF`, `rfid:<EPC>`, or anonymous detector
+labels (`keys`). One item can carry several tags across modalities, and tags
+can be added at runtime (`POST /items/keys/tags`) — manual tagging without
+restart. Anonymous label detections are Mahalanobis-gated against the
+existing track so a look-alike object across the room can't hijack it.
+
+### Fusion
+
+Per item: a 6-state (position+velocity) Kalman filter, pure-Python.
+Position/area observations are linear updates; ranges are EKF updates.
+Range-only tracks are seeded by coarse-grid multilateration at item height —
+ceiling-mounted (coplanar) anchors otherwise leave z unobservable and a
+naive init converges to the mirror solution above the ceiling. Uncertainty
+grows when nothing reports; estimates go `stale`, never silently wrong.
+
+### Plugins (`apartment_tracker/registry.py`)
+
+Four kinds: `sensor`, `detector`, `frame_source`, `trainer`. Config selects
+by name; third-party packages self-register via the
+`apartment_tracker.plugins` entry-point group. Optional heavy deps (cv2,
+onnxruntime) are imported only inside the plugin that needs them — the core
+import graph stays clean, and a missing backend errors only if config
+actually selects it.
+
+Built in today:
+
+- **sensors**: `camera` (any frame source × any detector, pinhole projection
+  onto known surface planes), `ble_scanner` (log-distance path-loss RSSI
+  ranging), `rf_tomography` (ellipse-weighted back-projection over an RF
+  link mesh — presence sensing with no wearable), `network_bridge` (JSON
+  lines over TCP from any MCU), `scripted` (tests/replay)
+- **detectors**: `aruco` (printable fiducials — cheapest reliable tag),
+  `onnx` (any YOLO-style exported model, COCO-pretrained or self-trained)
+- **frame sources**: `opencv` (USB webcam, RTSP/MJPEG URL — ESP32-CAM
+  works out of the box), `static` (files/replay)
+- **trainers**: `path_loss` (closed-form BLE calibration fit),
+  `detector_finetune` (wraps any external training command; output ONNX
+  slots back in via config)
+
+### MCU integration
+
+MCUs stay dumb and replaceable: anything that can open a TCP socket and
+print one JSON object per line participates via the `network_bridge` sensor:
+
+```json
+{"type": "rssi", "sensor_id": "esp32-hall", "mac": "AA:BB:CC:DD:EE:FF",
+ "anchor": [0.0, 4.0, 2.2], "rssi": -67}
+```
+
+Timestamps are assigned on receipt (MCU clocks are never trusted), malformed
+lines are counted and dropped (a flaky node can't take the tracker down),
+and raw RSSI is converted host-side with the trainable path-loss model — so
+recalibration never requires reflashing firmware.
+
+### Retraining
+
+The system is calibrated/retrained from recorded data, per modality:
+
+1. `DatasetRecorder` captures labeled samples (RSSI at known distances,
+   detection crops marked correct/incorrect) as JSONL.
+2. `apartment-tracker train path_loss` fits the BLE model to *your* walls
+   and furniture (closed-form, instant).
+3. `apartment-tracker train detector_finetune` shells out to any training
+   stack (ultralytics, a cloud job) and drops an ONNX file that the existing
+   `onnx` detector loads via config. The heavy ML stack is never a
+   dependency of the tracker itself.
+4. RF tomography recalibrates in-place (`calibrate()` re-baselines link RSS
+   after furniture moves).
+
+## Repository layout
+
+```
+apartment_tracker/
+  observations.py      # the 3 canonical observation shapes + Detection
+  registry.py          # plugin registry (the extension seam)
+  world.py             # zones over the world frame; point -> zone name
+  items.py             # item registry, multi-modality tags, runtime tagging
+  linalg.py            # tiny dense linear algebra (no numpy needed)
+  fusion/
+    kalman.py          # 6-state KF + EKF range update
+    engine.py          # identity resolution, gating, multilateration init
+  sensors/             # camera, ble, tomography, network bridge, mock
+  detectors/           # aruco, onnx
+  training/            # dataset capture + trainer plugins
+  config.py            # YAML -> world + items + sensor fleet
+  tracker.py           # poll/fuse orchestrator loop
+  api.py               # stdlib HTTP API
+  simulate.py          # full synthetic apartment (demo + e2e tests)
+  cli.py
+configs/apartment.example.yaml
+tests/                 # 44 tests, hardware-free
+```
+
+## Extending without breaking anything
+
+- **New sensor hardware**: implement `SensorAdapter.poll() -> [Observation]`,
+  decorate with `@register("sensor", "my_sensor")`, name it in YAML. Done.
+- **New camera type**: just a `frame_source` plugin; detectors and
+  projection are reused.
+- **New detection model**: export to ONNX, point config at it — or add a
+  `detector` plugin for a different runtime.
+- **New modality that doesn't fit position/range/area**: add an observation
+  type and one `isinstance` branch in the fusion engine; existing sensors
+  and configs are untouched.
+- **Out-of-tree plugins**: publish a package exposing the
+  `apartment_tracker.plugins` entry point; no fork needed.
