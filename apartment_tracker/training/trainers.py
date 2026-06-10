@@ -45,6 +45,30 @@ class PathLossTrainer:
         return {"tx_power": intercept, "exponent": -slope / 10.0}
 
 
+@register("trainer", "splat_rebuild")
+class SplatRebuildTrainer:
+    """Run an external splat pipeline (nerfstudio/OpenSplat/colmap) on a
+    capture directory; same shell-out pattern as detector_finetune. The GPU
+    stack is never a dependency of the tracker.
+
+      command: "ns-process-data images --data {capture} --output-dir {work}
+                && ns-train splatfacto --data {work} ... && cp ... {output}"
+    """
+
+    def __init__(self, command: str, capture_dir: str, output_path: str, work_dir: str = "work"):
+        self.command = command
+        self.capture_dir = capture_dir
+        self.output_path = output_path
+        self.work_dir = work_dir
+
+    def train(self, records: list[dict]) -> dict:
+        cmd = self.command.format(
+            capture=self.capture_dir, output=self.output_path, work=self.work_dir
+        )
+        subprocess.run(cmd, shell=True, check=True)
+        return {"splat_path": self.output_path}
+
+
 @register("trainer", "detector_finetune")
 class DetectorFinetuneTrainer:
     """Run an external training command against the recorded detection set.

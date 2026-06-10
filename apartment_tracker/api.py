@@ -9,18 +9,28 @@ GET  /events           -> recent zone-change events, oldest first
 GET  /overlay/map      -> world-space layers for the top-down map view
 GET  /overlay/camera/<sensor_id> -> same layers projected into camera pixels
 POST /items/<id>/tags  -> {"tag": "ble:AA:.."} manual tagging at runtime
+POST /assets/splat     -> replace the splat scan (raw body); atomic, no restart
+POST /assets/splat/transform -> update world.splat_transform at runtime
+
+The API binds to 127.0.0.1 by default; the splat upload endpoint is
+unauthenticated, so put a reverse proxy with auth in front before exposing
+it beyond localhost.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
+from pathlib import Path
 from urllib.parse import unquote
 
 from apartment_tracker.overlay import camera_overlay, map_overlay
 from apartment_tracker.tracker import Tracker
+
+UPLOAD_CHUNK = 1 << 20
 
 
 def _ui_html() -> bytes:
@@ -80,7 +90,42 @@ def make_handler(tracker: Tracker):
 
         def do_POST(self) -> None:
             parts = [unquote(p) for p in self.path.split("?")[0].split("/") if p]
-            if len(parts) == 3 and parts[0] == "items" and parts[2] == "tags":
+            if parts == ["assets", "splat"]:
+                path = getattr(tracker.cfg, "splat_asset", None)
+                if not path:
+                    self._send(400, {"error": "no splat_asset path configured"})
+                    return
+                length = int(self.headers.get("Content-Length", 0))
+                if length <= 0:
+                    self._send(400, {"error": "empty body"})
+                    return
+                dest = Path(path)
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                tmp = dest.with_suffix(dest.suffix + ".tmp")
+                written = 0
+                with open(tmp, "wb") as f:
+                    while written < length:
+                        chunk = self.rfile.read(min(UPLOAD_CHUNK, length - written))
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        written += len(chunk)
+                if written != length:
+                    tmp.unlink(missing_ok=True)
+                    self._send(400, {"error": "truncated upload"})
+                    return
+                os.replace(tmp, dest)
+                self._send(200, {"status": "updated", "bytes": written})
+            elif parts == ["assets", "splat", "transform"]:
+                length = int(self.headers.get("Content-Length", 0))
+                try:
+                    body = json.loads(self.rfile.read(length) or b"{}")
+                except json.JSONDecodeError:
+                    self._send(400, {"error": "invalid JSON"})
+                    return
+                tracker.cfg.splat_transform = body or None
+                self._send(200, {"status": "updated", "note": "runtime only — persist in config"})
+            elif len(parts) == 3 and parts[0] == "items" and parts[2] == "tags":
                 length = int(self.headers.get("Content-Length", 0))
                 try:
                     body = json.loads(self.rfile.read(length) or b"{}")

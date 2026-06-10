@@ -139,6 +139,11 @@ tracker host never pays for it.
 each fixed camera's `position/yaw_deg/pitch_deg/hfov_deg` from the COLMAP
 reconstruction produced by the splat scan — include one snapshot per camera
 in the scan's image set and supply two reference points; no tape measure.
+
+**Scheduled scan refresh:** `scripts/rebuild_splat.sh` runs the full loop
+on a GPU host (capture snapshots → train → recalibrate → push): the new
+scan is hot-swapped into the running tracker via `apartment-tracker
+update-splat` and open dashboards reload it automatically. Cron it weekly.
 Details and workflow: `docs/gaussian-splatting.md`.
 
 ### Persistence & history

@@ -85,6 +85,30 @@ outputs `.ply`/`.splat` directly).
    config; reuse the printed alignment as `world.splat_transform`.
 4. Set `world.splat_asset`, open the 3D tab: live items inside your room.
 
+## Scheduled rebuilds (weekly splat updates from a host PC)
+
+The scan goes stale as the room changes; rebuilding it is a cron job on
+whatever machine has the GPU — the tracker host is untouched:
+
+1. `apartment-tracker capture-snapshots -c apartment.yaml -o images/` pulls
+   one fresh frame from every configured camera (add walkthrough video
+   frames for coverage).
+2. Any splat pipeline (nerfstudio, OpenSplat, a phone-app export) trains
+   the new model.
+3. `apartment-tracker calibrate-cameras ...` re-derives camera poses from
+   the same reconstruction — diff against your config to catch a bumped
+   camera before it skews fusion.
+4. `apartment-tracker update-splat new.ply [--transform '{...}']` pushes
+   the scan to the running tracker over HTTP. The write is atomic
+   (tmp + rename), no restart; open dashboards detect the version bump
+   (asset mtime in `/overlay/map`) and reload the 3D scene automatically.
+
+`scripts/rebuild_splat.sh` is the whole loop, ready for cron
+(`0 4 * * 1`) or a systemd timer. There is also a `splat_rebuild` trainer
+plugin wrapping the external pipeline command for setups that prefer the
+trainer interface. Note: the upload endpoint is unauthenticated — keep the
+API on localhost or behind an authenticated reverse proxy.
+
 ## Future work
 
 - Splat-rendered synthetic views as training data for the ONNX detector

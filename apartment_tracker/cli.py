@@ -103,6 +103,72 @@ def cmd_train(args) -> int:
     return 0
 
 
+def cmd_update_splat(args) -> int:
+    base = f"http://{args.host}:{args.port}"
+    with open(args.file, "rb") as f:
+        data = f.read()
+    req = urllib.request.Request(
+        f"{base}/assets/splat",
+        data=data,
+        method="POST",
+        headers={"Content-Type": "application/octet-stream"},
+    )
+    with urllib.request.urlopen(req, timeout=args.timeout) as resp:
+        print(resp.read().decode())
+    if args.transform:
+        treq = urllib.request.Request(
+            f"{base}/assets/splat/transform",
+            data=args.transform.encode(),
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(treq, timeout=10) as resp:
+            print(resp.read().decode())
+    return 0
+
+
+def cmd_capture_snapshots(args) -> int:
+    """Grab one frame from each configured camera — scan input + calibration."""
+    from pathlib import Path
+
+    from apartment_tracker.config import load_config
+
+    try:
+        import cv2
+    except ImportError:
+        print("capture-snapshots requires opencv: pip install apartment-tracker[vision]",
+              file=sys.stderr)
+        return 1
+
+    cfg = load_config(args.config)
+    out = Path(args.output)
+    out.mkdir(parents=True, exist_ok=True)
+    captured = 0
+    for sensor in cfg.sensors:
+        source = getattr(sensor, "frame_source", None)
+        if source is None:
+            continue
+        try:
+            if hasattr(source, "start"):
+                source.start()
+            frame = source.get_frame()
+            if frame is None:
+                print(f"# {sensor.sensor_id}: no frame", file=sys.stderr)
+                continue
+            path = out / f"{sensor.sensor_id}.jpg"
+            if not cv2.imwrite(str(path), frame):
+                print(f"# {sensor.sensor_id}: unencodable frame", file=sys.stderr)
+                continue
+            print(path)
+            captured += 1
+        except Exception as e:
+            print(f"# {sensor.sensor_id}: {e}", file=sys.stderr)
+        finally:
+            if hasattr(source, "stop"):
+                source.stop()
+    return 0 if captured else 1
+
+
 def cmd_calibrate_cameras(args) -> int:
     import yaml
 
@@ -181,6 +247,21 @@ def main(argv: list[str] | None = None) -> int:
     calp.add_argument("--images", nargs="*", help="snapshot filenames to calibrate (default all)")
     calp.add_argument("--up", choices=["z", "y"], default="z", help="scan up-axis")
     calp.set_defaults(fn=cmd_calibrate_cameras)
+
+    upsp = sub.add_parser("update-splat", help="push a new splat scan to a running tracker")
+    upsp.add_argument("file", help=".ply/.splat to upload")
+    upsp.add_argument("--host", default="127.0.0.1")
+    upsp.add_argument("--port", type=int, default=8080)
+    upsp.add_argument("--transform", help='JSON splat_transform, e.g. \'{"scale": 1.8}\'')
+    upsp.add_argument("--timeout", type=int, default=300)
+    upsp.set_defaults(fn=cmd_update_splat)
+
+    capp = sub.add_parser(
+        "capture-snapshots", help="save one frame per configured camera (scan/calibration input)"
+    )
+    capp.add_argument("-c", "--config", required=True)
+    capp.add_argument("-o", "--output", default="snapshots")
+    capp.set_defaults(fn=cmd_capture_snapshots)
 
     trainp = sub.add_parser("train", help="run a trainer over a recorded dataset")
     trainp.add_argument("trainer", help="trainer plugin name, e.g. path_loss")

@@ -13,11 +13,22 @@ client-side (static/ui.html).
 from __future__ import annotations
 
 import math
+import os
 import time
 
 HEAT_MIN_VALUE = 0.05  # skip near-zero cells to bound payload size
 RING_SAMPLES = 36
 ITEM_HEIGHT_M = 0.8  # range spheres are drawn where items live, not at the anchor
+
+
+def _splat_version(path: str | None) -> int | None:
+    """mtime-based version so the UI reloads the scan after a hot swap."""
+    if not path:
+        return None
+    try:
+        return os.stat(path).st_mtime_ns
+    except OSError:
+        return None
 
 
 def floor_ring(anchor: tuple, range_m: float, z: float = ITEM_HEIGHT_M) -> dict | None:
@@ -97,6 +108,7 @@ def map_overlay(tracker) -> dict:
         "events": list(tracker.events)[-20:],
         "splat": bool(getattr(tracker.cfg, "splat_asset", None)),
         "splat_transform": getattr(tracker.cfg, "splat_transform", None),
+        "splat_version": _splat_version(getattr(tracker.cfg, "splat_asset", None)),
     }
 
 

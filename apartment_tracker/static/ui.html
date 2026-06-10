@@ -60,7 +60,7 @@ const LAYERS = [
   ["presence", "Presence", true],
 ];
 const ITEM_COLORS = ["#4ea1ff", "#ff7eb6", "#66d98c", "#c9a227", "#8a7dff", "#ff9d5c"];
-const state = { view: "map", cameras: [], data: null, toggles: {}, splat: false };
+const state = { view: "map", cameras: [], data: null, toggles: {}, splat: false, splatVersion: null };
 for (const [k, , def] of LAYERS)
   state.toggles[k] = localStorage.getItem("layer:" + k) ?? String(def);
 
@@ -517,6 +517,15 @@ async function tick() {
       const cams = d.cameras.map(c => c.sensor_id);
       if (JSON.stringify(cams) !== JSON.stringify(state.cameras) || d.splat !== state.splat) {
         state.cameras = cams; state.splat = d.splat; buildTabs();
+      }
+      if (d.splat_version !== state.splatVersion) {
+        // scan hot-swapped (weekly rebuild): rebuild the 3D viewer lazily
+        state.splatVersion = d.splat_version;
+        if (splat3d) {
+          splat3d = null;
+          document.getElementById("splat-wrap").innerHTML = "";
+          if (want3d) initSplat();
+        }
       }
       renderPanel(d.items, d.events);
       if (want3d) { if (splat3d) update3D(d); return; }
