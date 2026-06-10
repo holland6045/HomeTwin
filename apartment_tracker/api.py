@@ -1,10 +1,13 @@
 """HTTP API over the tracker. Stdlib only — runs anywhere the core runs.
 
+GET  /                 -> visualization dashboard (map + camera overlays)
 GET  /health           -> {"status": "ok", ...}
 GET  /items            -> all item estimates
 GET  /items/<query>    -> one item by id or name (404 if unknown)
 GET  /presence         -> latest occupancy estimate (tomography etc.)
 GET  /events           -> recent zone-change events, oldest first
+GET  /overlay/map      -> world-space layers for the top-down map view
+GET  /overlay/camera/<sensor_id> -> same layers projected into camera pixels
 POST /items/<id>/tags  -> {"tag": "ble:AA:.."} manual tagging at runtime
 """
 
@@ -13,9 +16,15 @@ from __future__ import annotations
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from importlib import resources
 from urllib.parse import unquote
 
+from apartment_tracker.overlay import camera_overlay, map_overlay
 from apartment_tracker.tracker import Tracker
+
+
+def _ui_html() -> bytes:
+    return (resources.files("apartment_tracker") / "static" / "ui.html").read_bytes()
 
 
 def make_handler(tracker: Tracker):
@@ -30,7 +39,19 @@ def make_handler(tracker: Tracker):
 
         def do_GET(self) -> None:
             parts = [unquote(p) for p in self.path.split("?")[0].split("/") if p]
-            if parts == ["health"]:
+            if parts in ([], ["ui"]):
+                body = _ui_html()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            elif parts == ["overlay", "map"]:
+                self._send(200, map_overlay(tracker))
+            elif len(parts) == 3 and parts[:2] == ["overlay", "camera"]:
+                data = camera_overlay(tracker, parts[2])
+                self._send(200, data) if data else self._send(404, {"error": "unknown camera"})
+            elif parts == ["health"]:
                 self._send(200, {"status": "ok", "sensors": len(tracker.sensors)})
             elif parts == ["items"]:
                 self._send(200, tracker.snapshot())

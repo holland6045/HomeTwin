@@ -34,6 +34,8 @@ sensors:
     surface_z: 0.9
     source: {type: opencv, device: 0}
     detector: {type: aruco, dictionary: DICT_4X4_50}
+    # browser-loadable stream for the dashboard's camera-overlay view
+    # stream_url: "http://192.168.1.40/mjpeg"
 
   # Same camera hardware, different brains: an ONNX model fine-tuned on your
   # items via `apartment-tracker train detector_finetune`.

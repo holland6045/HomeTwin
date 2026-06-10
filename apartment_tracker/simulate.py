@@ -28,22 +28,11 @@ TRUE_WALLET = (2.0, 3.2, 0.45)  # sofa
 
 
 def project_to_pixel(geo: CameraGeometry, p: tuple[float, float, float]):
-    """Inverse of CameraGeometry.ray — world point to normalized pixel."""
-    wx, wy, wz = (p[i] - geo.position[i] for i in range(3))
-    sy, cyw = math.sin(geo.yaw), math.cos(geo.yaw)
-    fz = wx * cyw + wy * sy
-    cx = -wx * sy + wy * cyw
-    fy = -wz
-    sp, cp = math.sin(geo.pitch), math.cos(geo.pitch)
-    cy = fy * cp - fz * sp
-    cz = fy * sp + fz * cp
-    if cz <= 1e-6:
+    """World point to normalized pixel, only if inside the frame."""
+    pix = geo.world_to_pixel(p)
+    if pix is None or not (0.0 <= pix[0] <= 1.0 and 0.0 <= pix[1] <= 1.0):
         return None
-    u = cx / cz / (2.0 * geo.tan_h) + 0.5
-    v = cy / cz / (2.0 * geo.tan_v) + 0.5
-    if 0.0 <= u <= 1.0 and 0.0 <= v <= 1.0:
-        return (u, v)
-    return None
+    return pix
 
 
 class SimWorldState:

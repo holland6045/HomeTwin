@@ -27,3 +27,11 @@ class SensorAdapter(ABC):
     @abstractmethod
     def poll(self) -> list[Observation]:
         """Return observations ready since the last call. Must not block."""
+
+    def overlay(self) -> dict | None:
+        """Optional renderable layer for the visualization UI.
+
+        Sensors that can be drawn (tomography heat maps, camera poses)
+        return a dict with a "kind" key; everything else returns None.
+        """
+        return None

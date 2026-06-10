@@ -117,10 +117,32 @@ class TomographySensor(SensorAdapter):
         self.label = label
         self.min_atten = min_attenuation_db
         self._baseline: dict[tuple[str, str], float] = {}
+        self._last_image: list[list[float]] | None = None
+        self._last_image_ts: float = 0.0
 
     @staticmethod
     def _key(a: str, b: str) -> tuple[str, str]:
         return (a, b) if a <= b else (b, a)
+
+    def overlay(self) -> dict:
+        g = self.grid
+        peak = (
+            max(max(row) for row in self._last_image) if self._last_image else 0.0
+        )
+        return {
+            "kind": "heatmap",
+            "sensor_id": self.sensor_id,
+            "bounds": [g.xmin, g.ymin, g.xmax, g.ymax],
+            "cell_m": g.cell,
+            "height_m": self.height_m,
+            "timestamp": self._last_image_ts,
+            "values": (
+                [[round(v / peak, 3) for v in row] for row in self._last_image]
+                if self._last_image and peak > 0
+                else None
+            ),
+            "nodes": {k: list(v) for k, v in self.grid.nodes.items()},
+        }
 
     def calibrate(self, readings: list[tuple[str, str, float]]) -> None:
         """Record empty-room RSS baselines. Re-run whenever furniture moves."""
@@ -142,8 +164,12 @@ class TomographySensor(SensorAdapter):
             if loss >= self.min_atten:
                 atten[key] = loss
         if not atten:
+            self._last_image = None
             return []
-        result = self.grid.blob(self.grid.reconstruct(atten))
+        img = self.grid.reconstruct(atten)
+        self._last_image = img
+        self._last_image_ts = time.time()
+        result = self.grid.blob(img)
         if result is None:
             return []
         (cx, cy), spread, peak = result

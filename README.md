@@ -44,6 +44,9 @@ pip install -e .[ml]        # optional: ONNX object detection
 # zero-hardware demo: synthetic apartment with all three modalities
 apartment-tracker simulate
 
+# same demo as a live dashboard with togglable sensor overlays
+apartment-tracker simulate --serve   # then open http://127.0.0.1:8080/
+
 # real deployment
 apartment-tracker run -c configs/apartment.example.yaml
 apartment-tracker where keys
@@ -87,6 +90,26 @@ Range-only tracks are seeded by coarse-grid multilateration at item height —
 ceiling-mounted (coplanar) anchors otherwise leave z unobservable and a
 naive init converges to the mirror solution above the ceiling. Uncertainty
 grows when nothing reports; estimates go `stale`, never silently wrong.
+
+### Visualization: fusion overlays
+
+The API serves a dashboard (`GET /`) with two render targets fed by the
+same layer data:
+
+- **Map view** — top-down apartment: zones, fused item estimates with
+  uncertainty circles, BLE range rings (each sphere intersected with item
+  height), the tomography occupancy heat map with mesh node positions,
+  presence blob, and camera poses.
+- **Camera view** (one tab per camera) — the same layers projected into
+  that camera's pixel space via the shared pinhole geometry, composited
+  over the camera's live MJPEG stream (`stream_url` in camera config).
+  You see the heat map and BLE rings *on the video*.
+
+Every layer is individually toggleable (persisted in the browser). The
+server only assembles JSON (`/overlay/map`, `/overlay/camera/<id>`);
+rendering is client-side canvas, so the core stays dependency-free. Any
+sensor can publish a drawable layer by implementing `overlay()` — the UI
+picks it up without changes.
 
 ### Persistence & history
 
@@ -170,7 +193,9 @@ apartment_tracker/
   config.py            # YAML -> world + items + sensor fleet
   tracker.py           # poll/fuse orchestrator loop, zone-change events
   store.py             # atomic state persistence across restarts
-  api.py               # stdlib HTTP API
+  overlay.py           # map + per-camera overlay assembly for the UI
+  static/ui.html       # canvas dashboard with per-layer toggles
+  api.py               # stdlib HTTP API + dashboard
   simulate.py          # full synthetic apartment (demo + e2e tests)
   cli.py
 configs/apartment.example.yaml

@@ -67,6 +67,21 @@ class CameraGeometry:
             return None
         return (self.position[0] + dx * t, self.position[1] + dy * t, plane_z)
 
+    def world_to_pixel(self, p: tuple[float, float, float]) -> tuple[float, float] | None:
+        """Inverse of ray(): world point -> normalized pixel, None if behind
+        the camera. Coordinates may fall outside [0,1]; callers clip."""
+        wx, wy, wz = (p[i] - self.position[i] for i in range(3))
+        sy, cyw = math.sin(self.yaw), math.cos(self.yaw)
+        fz = wx * cyw + wy * sy
+        cx = -wx * sy + wy * cyw
+        fy = -wz
+        sp, cp = math.sin(self.pitch), math.cos(self.pitch)
+        cy = fy * cp - fz * sp
+        cz = fy * sp + fz * cp
+        if cz <= 1e-6:
+            return None
+        return (cx / cz / (2.0 * self.tan_h) + 0.5, cy / cz / (2.0 * self.tan_v) + 0.5)
+
 
 @register("sensor", "camera")
 class CameraSensor(SensorAdapter):
@@ -84,8 +99,10 @@ class CameraSensor(SensorAdapter):
         pitch_deg: float = 0.0,
         hfov_deg: float = 70.0,
         source: dict | None = None,
+        stream_url: str | None = None,  # browser-loadable MJPEG/snapshot URL
     ):
         super().__init__(sensor_id)
+        self.stream_url = stream_url
         self.geometry = geometry or CameraGeometry(
             tuple(position or (0, 0, 2.0)), yaw_deg, pitch_deg, hfov_deg
         )
@@ -125,6 +142,17 @@ class CameraSensor(SensorAdapter):
             position=pos,
             sigma_m=self.base_sigma_m * max(d, 1.0),
         )
+
+    def overlay(self) -> dict:
+        return {
+            "kind": "camera",
+            "sensor_id": self.sensor_id,
+            "position": list(self.geometry.position),
+            "yaw_deg": math.degrees(self.geometry.yaw),
+            "hfov_deg": math.degrees(2.0 * math.atan(self.geometry.tan_h)),
+            "surface_z": self.surface_z,
+            "stream_url": self.stream_url,
+        }
 
     def poll(self) -> list[PositionObservation]:
         frame = self.frame_source.get_frame()

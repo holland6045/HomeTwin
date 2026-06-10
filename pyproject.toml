@@ -20,5 +20,8 @@ apartment-tracker = "apartment_tracker.cli:main"
 [tool.setuptools.packages.find]
 include = ["apartment_tracker*"]
 
+[tool.setuptools.package-data]
+apartment_tracker = ["static/*.html"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -52,8 +52,32 @@ def cmd_where(args) -> int:
 def cmd_simulate(args) -> int:
     from apartment_tracker.simulate import run_simulation
 
+    if args.serve:
+        return _simulate_serve(args)
     result = run_simulation(ticks=args.ticks, seed=args.seed)
     print(json.dumps(result, indent=2))
+    return 0
+
+
+def _simulate_serve(args) -> int:
+    import time
+
+    from apartment_tracker.api import ApiServer
+    from apartment_tracker.simulate import build_simulation
+
+    tracker, state = build_simulation(seed=args.seed)
+    api = ApiServer(tracker, "127.0.0.1", args.port)
+    api.start()
+    print(f"Live demo: http://127.0.0.1:{api.port}/ — Ctrl-C to stop", file=sys.stderr)
+    try:
+        while True:
+            state.tick()
+            tracker.step()
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        api.stop()
     return 0
 
 
@@ -97,6 +121,8 @@ def main(argv: list[str] | None = None) -> int:
     simp = sub.add_parser("simulate", help="run the synthetic apartment demo")
     simp.add_argument("--ticks", type=int, default=120)
     simp.add_argument("--seed", type=int, default=1)
+    simp.add_argument("--serve", action="store_true", help="serve the live dashboard instead")
+    simp.add_argument("--port", type=int, default=8080)
     simp.set_defaults(fn=cmd_simulate)
 
     plugp = sub.add_parser("plugins", help="list available plugins")
