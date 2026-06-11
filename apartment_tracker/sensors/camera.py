@@ -104,6 +104,7 @@ class CameraSensor(SensorAdapter):
         base_sigma_m: float = 0.25,
         mode: str = "surface",  # "surface" | "ray"
         bearing_sigma_rad: float = 0.02,
+        anchor_correct: bool = False,  # fold anchor residuals back into the pose
         # config-file path: build sub-plugins by name
         position: tuple | None = None,
         yaw_deg: float = 0.0,
@@ -132,6 +133,18 @@ class CameraSensor(SensorAdapter):
         self.base_sigma_m = base_sigma_m
         self.mode = mode
         self.bearing_sigma_rad = bearing_sigma_rad
+        self.anchor_correct = anchor_correct
+        self.calibrator = None
+
+    def attach_anchors(self, anchors: dict[str, tuple[float, float, float]]) -> None:
+        """Give this camera the world's calibration anchors (optional)."""
+        if not anchors:
+            return
+        from apartment_tracker.anchors import AnchorCalibrator
+
+        self.calibrator = AnchorCalibrator(
+            self.geometry, anchors, auto_correct=self.anchor_correct
+        )
 
     def start(self) -> None:
         if hasattr(self.frame_source, "start"):
@@ -178,6 +191,7 @@ class CameraSensor(SensorAdapter):
             "hfov_deg": math.degrees(2.0 * math.atan(self.geometry.tan_h)),
             "surface_z": self.surface_z,
             "stream_url": self.stream_url,
+            "calibration": self.calibrator.status() if self.calibrator else None,
         }
 
     def poll(self) -> list[Observation]:
@@ -187,6 +201,12 @@ class CameraSensor(SensorAdapter):
         ts = self.clock()
         out = []
         for det in self.detector.detect(frame):
+            if (
+                self.calibrator
+                and det.tag_id
+                and self.calibrator.observe(det.tag_id, *det.center, ts)
+            ):
+                continue  # calibration target, not a tracked item
             obs = self.to_observation(det, ts)
             if obs is not None:
                 out.append(obs)

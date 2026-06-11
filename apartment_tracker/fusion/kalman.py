@@ -67,6 +67,12 @@ class KalmanFilter3D:
         residual = la.vec_sub(list(z), list(self.position))
         self._update(H, residual, la.eye(3, sigma_m**2))
 
+    def update_axis(self, axis: int, value: float, sigma_m: float) -> None:
+        """Single-axis position update — used for soft physical priors."""
+        H = la.zeros(1, 6)
+        H[0][axis] = 1.0
+        self._update(H, [value - self.x[axis]], [[sigma_m**2]])
+
     def update_range(
         self, anchor: tuple[float, float, float], range_m: float, sigma_m: float
     ) -> None:

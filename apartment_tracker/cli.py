@@ -178,6 +178,34 @@ def cmd_capture_snapshots(args) -> int:
     return 0 if captured else 1
 
 
+def cmd_make_anchor(args) -> int:
+    """Generate a printable blocky ArUco calibration target."""
+    try:
+        import cv2
+    except ImportError:
+        print("make-anchor requires opencv: pip install apartment-tracker[vision]",
+              file=sys.stderr)
+        return 1
+    dictionary = cv2.aruco.getPredefinedDictionary(getattr(cv2.aruco, args.dictionary))
+    marker = cv2.aruco.generateImageMarker(dictionary, args.id, args.pixels)
+    border = args.pixels // 8  # quiet zone so detection survives dark walls
+    marker = cv2.copyMakeBorder(
+        marker, border, border, border, border, cv2.BORDER_CONSTANT, value=255
+    )
+    out = args.output or f"anchor-{args.id}.png"
+    if not cv2.imwrite(out, marker):
+        print(f"failed to write {out}", file=sys.stderr)
+        return 1
+    print(out)
+    print(
+        f"# print flat, mount rigid; then add to config:\n"
+        f"# world:\n#   anchors:\n"
+        f"#     - {{tag: \"aruco:{args.id}\", position: [x, y, z]}}",
+        file=sys.stderr,
+    )
+    return 0
+
+
 def cmd_calibrate_cameras(args) -> int:
     import yaml
 
@@ -247,6 +275,13 @@ def main(argv: list[str] | None = None) -> int:
 
     plugp = sub.add_parser("plugins", help="list available plugins")
     plugp.set_defaults(fn=cmd_plugins)
+
+    ancp = sub.add_parser("make-anchor", help="generate a printable ArUco calibration target")
+    ancp.add_argument("--id", type=int, required=True, help="marker id (use 100+ for anchors)")
+    ancp.add_argument("--dictionary", default="DICT_4X4_50")
+    ancp.add_argument("--pixels", type=int, default=800)
+    ancp.add_argument("-o", "--output")
+    ancp.set_defaults(fn=cmd_make_anchor)
 
     calp = sub.add_parser(
         "calibrate-cameras",

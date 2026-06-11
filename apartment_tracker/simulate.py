@@ -26,6 +26,10 @@ PHONE_MAC = "BB:66:77:88:99:00"
 
 TRUE_KEYS = (6.5, 1.0, 0.9)  # kitchen counter
 TRUE_WALLET = (2.0, 3.2, 0.45)  # sofa
+ANCHOR_TAG = "aruco:100"
+ANCHOR_POS = (6.9, 1.5, 0.9)  # blocky calibration target on the counter
+CAM_KITCHEN_YAW_TRUE = -110.0
+CAM_KITCHEN_YAW_BUMPED = -108.5  # config is 1.5 deg off; the anchor heals it
 
 
 def project_to_pixel(geo: CameraGeometry, p: tuple[float, float, float]):
@@ -62,19 +66,23 @@ class SimWorldState:
 
 
 class SimArucoDetector:
-    """Reports the keys' ArUco tag wherever the camera would see it."""
+    """Reports the keys' tag and the calibration anchor as the *physical*
+    camera would see them (true geometry, not the configured one)."""
 
     def __init__(self, geo: CameraGeometry, state: SimWorldState, noise_px: float = 0.004):
         self.geo, self.state, self.noise = geo, state, noise_px
 
     def detect(self, frame) -> list[Detection]:
-        pix = project_to_pixel(self.geo, TRUE_KEYS)
-        if pix is None:
-            return []
         rng = self.state.rng
-        u = pix[0] + rng.gauss(0, self.noise)
-        v = pix[1] + rng.gauss(0, self.noise)
-        return [Detection(label="aruco", confidence=1.0, bbox=(u, v, 0.0, 0.0), tag_id="aruco:7")]
+        out = []
+        for tag, pos in (("aruco:7", TRUE_KEYS), (ANCHOR_TAG, ANCHOR_POS)):
+            pix = project_to_pixel(self.geo, pos)
+            if pix is None:
+                continue
+            u = pix[0] + rng.gauss(0, self.noise)
+            v = pix[1] + rng.gauss(0, self.noise)
+            out.append(Detection(label="aruco", confidence=1.0, bbox=(u, v, 0.0, 0.0), tag_id=tag))
+        return out
 
 
 class SimFrameSource:
@@ -154,15 +162,24 @@ def build_simulation(seed: int = 1) -> tuple[Tracker, SimWorldState]:
     items.add(Item("wallet", "Wallet", tag_ids=[f"ble:{WALLET_MAC}"]))
     items.add(Item("phone", "Phone", labels=["phone"], tag_ids=[f"ble:{PHONE_MAC}"]))
 
-    geo = CameraGeometry(position=(7.5, 3.8, 2.3), yaw_deg=-110.0, pitch_deg=40.0, hfov_deg=80.0)
+    # detectors see through the camera's TRUE mounting; the sensor is
+    # configured with a bumped yaw that the anchor target corrects online
+    true_geo = CameraGeometry(
+        position=(7.5, 3.8, 2.3), yaw_deg=CAM_KITCHEN_YAW_TRUE, pitch_deg=40.0, hfov_deg=80.0
+    )
+    cfg_geo = CameraGeometry(
+        position=(7.5, 3.8, 2.3), yaw_deg=CAM_KITCHEN_YAW_BUMPED, pitch_deg=40.0, hfov_deg=80.0
+    )
     camera = CameraSensor(
         "cam-kitchen",
-        geometry=geo,
+        geometry=cfg_geo,
         frame_source=SimFrameSource(),
-        detector=SimArucoDetector(geo, state),
+        detector=SimArucoDetector(true_geo, state),
         surface_z=TRUE_KEYS[2],
         base_sigma_m=0.1,
+        anchor_correct=True,
     )
+    camera.attach_anchors({ANCHOR_TAG: ANCHOR_POS})
 
     # two overlapping living-room cameras in ray mode: their sight rays are
     # triangulated by the fusion engine — no surface assumption for the phone
@@ -217,6 +234,7 @@ def build_simulation(seed: int = 1) -> tuple[Tracker, SimWorldState]:
         items=items,
         sensors=[camera, *ray_cams, *scanners, rti],
         poll_hz=2.0,
+        anchors={ANCHOR_TAG: ANCHOR_POS},
     )
     for sensor in cfg.sensors:
         sensor.clock = lambda: state.now

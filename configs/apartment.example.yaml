@@ -9,6 +9,12 @@ world:
   # See docs/gaussian-splatting.md.
   # splat_asset: scans/apartment.ply
   # splat_transform: {position: [0, 0, 0], rotation_deg: [0, 0, 0], scale: 1.0}
+  # Blocky calibration targets (printed ArUco, surveyed once): a shared
+  # fixed reference for every camera that sees one. Optional — cameras run
+  # on configured poses alone. Generate: apartment-tracker make-anchor --id 100
+  # anchors:
+  #   - {tag: "aruco:100", position: [6.9, 1.5, 0.9]}   # kitchen counter
+  #   - {tag: "aruco:101", position: [0.3, 2.0, 1.4]}   # hallway wall
   zones:
     - {name: living_room,     min: [0, 0, 0],        max: [5, 4, 2.6]}
     - {name: kitchen,         min: [5, 0, 0],        max: [8, 4, 2.6]}
@@ -43,6 +49,8 @@ sensors:
     detector: {type: aruco, dictionary: DICT_4X4_50}
     # browser-loadable stream for the dashboard's camera-overlay view
     # stream_url: "http://192.168.1.40/mjpeg"
+    # fold anchor residuals back into this camera's pose (default: report only)
+    # anchor_correct: true
 
   # Same camera hardware, different brains: an ONNX model fine-tuned on your
   # items via `apartment-tracker train detector_finetune`.

@@ -29,6 +29,7 @@ class AppConfig:
     dataset_dir: str = "dataset"
     state_path: str | None = None
     save_interval_s: float = 30.0
+    anchors: dict = field(default_factory=dict)  # fiducial tag -> world position
     splat_asset: str | None = None  # .splat/.ply scan rendered by the dashboard's 3D tab
     splat_transform: dict | None = None  # aligns the scan to the world frame
     raw: dict = field(default_factory=dict)
@@ -73,6 +74,13 @@ def load_config(path: str | Path) -> AppConfig:
     items = ItemRegistry.from_config(raw.get("items", []))
     sensors = [build_sensor(c) for c in raw.get("sensors", [])]
 
+    anchors = {
+        str(a["tag"]): tuple(a["position"]) for a in raw.get("world", {}).get("anchors", [])
+    }
+    for sensor in sensors:
+        if anchors and hasattr(sensor, "attach_anchors"):
+            sensor.attach_anchors(anchors)
+
     tracker = raw.get("tracker", {})
     api = raw.get("api", {})
     return AppConfig(
@@ -87,6 +95,7 @@ def load_config(path: str | Path) -> AppConfig:
         dataset_dir=tracker.get("dataset_dir", "dataset"),
         state_path=tracker.get("state_path"),
         save_interval_s=float(tracker.get("save_interval_s", 30.0)),
+        anchors=anchors,
         splat_asset=raw.get("world", {}).get("splat_asset"),
         splat_transform=raw.get("world", {}).get("splat_transform"),
         raw=raw,

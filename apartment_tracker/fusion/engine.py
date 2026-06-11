@@ -33,6 +33,12 @@ ITEM_HEIGHT_SIGMA_M = 0.6
 MIN_ANCHORS_FOR_INIT = 3
 MAX_PENDING_BEFORE_INIT = 5
 MIN_RAY_ANGLE_RAD = 0.035  # ~2 deg of viewpoint diversity before triangulating
+# Coplanar (ceiling) anchors leave z nearly unobservable from ranges, so it
+# random-walks under process noise. Tracks with no recent strong fix get a
+# gentle height prior as a spring on that axis.
+Z_PRIOR_AFTER_S = 5.0
+Z_PRIOR_INTERVAL_S = 1.0
+Z_PRIOR_SIGMA_M = 0.9
 
 
 def triangulate_rays(rays: list[BearingObservation]) -> tuple[float, float, float] | None:
@@ -113,6 +119,8 @@ class TrackState:
     last_sensor: str = ""
     observation_count: int = 0
     contributors: dict[str, int] = field(default_factory=dict)
+    last_strong_update: float = 0.0  # last position/bearing/area fix
+    last_z_prior: float = 0.0
 
     @property
     def position(self) -> tuple[float, float, float]:
@@ -193,6 +201,12 @@ class FusionEngine:
             else:
                 track.filter.predict(max(obs.timestamp - track.last_update, 0.0))
                 track.filter.update_range(obs.anchor, obs.range_m, obs.sigma_m)
+            if (
+                obs.timestamp - track.last_strong_update > Z_PRIOR_AFTER_S
+                and obs.timestamp - track.last_z_prior >= Z_PRIOR_INTERVAL_S
+            ):
+                track.filter.update_axis(2, ITEM_HEIGHT_PRIOR_M, Z_PRIOR_SIGMA_M)
+                track.last_z_prior = obs.timestamp
         elif isinstance(obs, BearingObservation):
             track = self.tracks.get(item_id)
             if track is not None:
@@ -231,6 +245,8 @@ class FusionEngine:
             return None
 
         track.last_update = obs.timestamp
+        if not isinstance(obs, RangeObservation):
+            track.last_strong_update = obs.timestamp
         track.last_sensor = obs.sensor_id
         track.observation_count += 1
         track.contributors[obs.sensor_id] = track.contributors.get(obs.sensor_id, 0) + 1

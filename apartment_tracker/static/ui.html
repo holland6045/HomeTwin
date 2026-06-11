@@ -56,6 +56,7 @@ const LAYERS = [
   ["rings", "BLE ranges", true],
   ["bearings", "Camera rays", true],
   ["trails", "Trails", true],
+  ["anchors", "Anchors", true],
   ["items", "Items", true],
   ["presence", "Presence", true],
 ];
@@ -220,10 +221,20 @@ function renderMap(d) {
     ctx.fillStyle = "#8a7dff"; ctx.fillText("presence", px + 6, py);
   }
 
+  if (on("anchors")) for (const a of (d.anchors || [])) {
+    const [px, py] = T(a.position);
+    ctx.fillStyle = "#e8e8e8"; ctx.fillRect(px - 5, py - 5, 10, 10);
+    ctx.fillStyle = "#14171c"; ctx.fillRect(px - 3, py - 3, 3, 3); ctx.fillRect(px, py, 3, 3);
+    ctx.fillStyle = "#9aa3b2"; ctx.font = "10px system-ui";
+    ctx.fillText(a.tag, px + 8, py + 4);
+  }
+
   for (const c of d.cameras) {
     const [px, py] = T(c.position);
     ctx.save(); ctx.translate(px, py); ctx.rotate(-c.yaw_deg * Math.PI / 180);
-    ctx.fillStyle = "#c9a227";
+    // unhealthy calibration (drifted camera) renders red
+    const cal = c.calibration;
+    ctx.fillStyle = cal && cal.healthy === false ? "#e05c5c" : "#c9a227";
     ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(14, -6); ctx.lineTo(14, 6); ctx.closePath(); ctx.fill();
     ctx.restore();
   }
@@ -464,10 +475,23 @@ function update3D(d) {
     group.add(s);
   }
 
+  if (on("anchors")) for (const a of (d.anchors || [])) {
+    const cube = new THREE.Mesh(
+      new THREE.BoxGeometry(0.08, 0.08, 0.08),
+      new THREE.MeshBasicMaterial({ color: 0xe8e8e8 }));
+    cube.position.set(...a.position);
+    group.add(cube);
+    const label = makeLabel(THREE, a.tag, "#9aa3b2");
+    label.position.set(a.position[0], a.position[1], a.position[2] + 0.18);
+    group.add(label);
+  }
+
   for (const c of d.cameras) {
+    const cal = c.calibration;
     const cone = new THREE.Mesh(
       new THREE.ConeGeometry(0.1, 0.3, 12),
-      new THREE.MeshBasicMaterial({ color: 0xc9a227 }));
+      new THREE.MeshBasicMaterial({
+        color: cal && cal.healthy === false ? 0xe05c5c : 0xc9a227 }));
     cone.position.set(...c.position);
     // ConeGeometry's tip points +y; rotate about z so it aims along yaw
     cone.rotation.z = (c.yaw_deg * Math.PI / 180) - Math.PI / 2;

@@ -135,6 +135,14 @@ tomography heat map, zones, presence — as a Three.js scene composited
 or over a ground grid otherwise. Renderer is lazy-loaded client-side; the
 tracker host never pays for it.
 
+**Calibration anchors (optional):** printed ArUco blocks at surveyed
+positions (`apartment-tracker make-anchor`, `world.anchors` in config)
+give every camera that sees one a shared fixed reference: drift is
+detected and reported (drifted cameras render red), and with
+`anchor_correct: true` rotation drift self-heals online, bounded to ±10°
+from the configured pose. Cameras without an anchor in view are
+unaffected. Details: `docs/calibration-anchors.md`.
+
 **Camera auto-calibration:** `apartment-tracker calibrate-cameras` derives
 each fixed camera's `position/yaw_deg/pitch_deg/hfov_deg` from the COLMAP
 reconstruction produced by the splat scan — include one snapshot per camera

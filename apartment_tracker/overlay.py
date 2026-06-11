@@ -95,6 +95,10 @@ def map_overlay(tracker) -> dict:
         for item_id, trail in tracker.trails.items()
         if len(trail) >= 2
     ]
+    anchors = [
+        {"tag": tag, "position": list(pos)}
+        for tag, pos in getattr(tracker.cfg, "anchors", {}).items()
+    ]
     return {
         "timestamp": now,
         "zones": zones,
@@ -102,6 +106,7 @@ def map_overlay(tracker) -> dict:
         "rings": rings,
         "bearings": bearings,
         "trails": trails,
+        "anchors": anchors,
         "heatmaps": heatmaps,
         "cameras": cameras,
         "presence": tracker.presence,
