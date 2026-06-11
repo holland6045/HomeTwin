@@ -99,6 +99,10 @@ def map_overlay(tracker) -> dict:
         {"tag": tag, "position": list(pos)}
         for tag, pos in getattr(tracker.cfg, "anchors", {}).items()
     ]
+    spots = [
+        {"name": s.name, "position": list(s.position), "radius": s.radius, "tag": s.tag}
+        for s in tracker.cfg.world.spots
+    ]
     return {
         "timestamp": now,
         "zones": zones,
@@ -107,6 +111,7 @@ def map_overlay(tracker) -> dict:
         "bearings": bearings,
         "trails": trails,
         "anchors": anchors,
+        "spots": spots,
         "heatmaps": heatmaps,
         "cameras": cameras,
         "presence": tracker.presence,

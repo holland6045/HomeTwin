@@ -151,8 +151,31 @@ class FusionEngine:
             if mapped:
                 return mapped
         if obs.label:
-            return self.items.resolve_label(obs.label)
+            candidates = self.items.label_candidates(obs.label)
+            if len(candidates) == 1:
+                return candidates[0]
+            if len(candidates) > 1:
+                return self._nearest_candidate(candidates, obs)
         return None
+
+    def _nearest_candidate(self, candidates: list[str], obs: Observation) -> str | None:
+        """Several identical-looking items share this label (storage boxes):
+        attribute the sighting to the gated nearest existing track, or to no
+        one — an anonymous look-alike must never seed or hijack a track."""
+        best = None
+        for item_id in candidates:
+            track = self.tracks.get(item_id)
+            if track is None:
+                continue
+            if isinstance(obs, PositionObservation):
+                m = track.filter.mahalanobis_sq(obs.position, obs.sigma_m)
+            elif isinstance(obs, BearingObservation):
+                m = track.filter.mahalanobis_bearing_sq(obs.origin, obs.direction, obs.sigma_rad)
+            else:
+                continue
+            if m <= GATE_MAHALANOBIS_SQ and (best is None or m < best[1]):
+                best = (item_id, m)
+        return best[0] if best else None
 
     def _track_for(self, item_id: str, seed: tuple[float, float, float], ts: float) -> TrackState:
         track = self.tracks.get(item_id)
@@ -306,6 +329,7 @@ class FusionEngine:
                     status="stale" if age > self.stale_after_s else "tracked",
                     position=[round(v, 3) for v in track.position],
                     zone=self.world.locate(track.position),
+                    spot=self.world.locate_spot(track.position),
                     sigma_m=round(track.sigma_m, 3),
                     age_s=round(age, 1),
                     last_sensor=track.last_sensor,

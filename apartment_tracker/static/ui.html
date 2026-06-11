@@ -57,6 +57,7 @@ const LAYERS = [
   ["bearings", "Camera rays", true],
   ["trails", "Trails", true],
   ["anchors", "Anchors", true],
+  ["spots", "Spots", true],
   ["items", "Items", true],
   ["presence", "Presence", true],
 ];
@@ -219,6 +220,16 @@ function renderMap(d) {
     ctx.fillStyle = "rgba(138,125,255,0.25)";
     ctx.beginPath(); ctx.arc(px, py, d.presence.sigma_m * scale, 0, 7); ctx.fill();
     ctx.fillStyle = "#8a7dff"; ctx.fillText("presence", px + 6, py);
+  }
+
+  if (on("spots")) for (const s of (d.spots || [])) {
+    const [px, py] = T(s.position);
+    ctx.strokeStyle = "rgba(157,255,0,0.5)"; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(px, py, Math.max(s.radius * scale, 3), 0, 7); ctx.stroke();
+    ctx.save(); ctx.translate(px, py); ctx.rotate(Math.PI / 4);
+    ctx.fillStyle = "#9dff00"; ctx.fillRect(-3, -3, 6, 6); ctx.restore();
+    ctx.fillStyle = "#7da356"; ctx.font = "10px system-ui";
+    ctx.fillText(s.name, px + 7, py - 5);
   }
 
   if (on("anchors")) for (const a of (d.anchors || [])) {
@@ -475,6 +486,17 @@ function update3D(d) {
     group.add(s);
   }
 
+  if (on("spots")) for (const s of (d.spots || [])) {
+    const oct = new THREE.Mesh(
+      new THREE.OctahedronGeometry(0.06),
+      new THREE.MeshBasicMaterial({ color: 0x9dff00 }));
+    oct.position.set(...s.position);
+    group.add(oct);
+    const label = makeLabel(THREE, s.name, "#7da356");
+    label.position.set(s.position[0], s.position[1], s.position[2] + 0.15);
+    group.add(label);
+  }
+
   if (on("anchors")) for (const a of (d.anchors || [])) {
     const cube = new THREE.Mesh(
       new THREE.BoxGeometry(0.08, 0.08, 0.08),
@@ -527,7 +549,7 @@ function renderPanel(items, events) {
     row.className = "item-row";
     const where = it.status === "never_seen"
       ? '<span class="never">never seen</span>'
-      : `<span class="zone-name">${it.zone || "unzoned"}</span>` +
+      : `<span class="zone-name">${it.spot || it.zone || "unzoned"}</span>` +
         ` ±${it.sigma_m}m <span class="${it.status === "stale" ? "stale" : ""}">${it.age_s}s</span>`;
     row.innerHTML = `<span>${it.name}</span><span>${where}</span>`;
     list.append(row);
@@ -537,7 +559,7 @@ function renderPanel(items, events) {
   for (const e of [...events].reverse()) {
     const div = document.createElement("div");
     div.className = "ev";
-    div.textContent = `${e.item_id}: ${e.from_zone || "?"} → ${e.to_zone || "?"}`;
+    div.textContent = `${e.item_id}: ${e.from_spot || e.from_zone || "?"} → ${e.to_spot || e.to_zone || "?"}`;
     ev.append(div);
   }
 }

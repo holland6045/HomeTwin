@@ -15,6 +15,13 @@ world:
   # anchors:
   #   - {tag: "aruco:100", position: [6.9, 1.5, 0.9]}   # kitchen counter
   #   - {tag: "aruco:101", position: [0.3, 2.0, 1.4]}   # hallway wall
+  # Spots: drawer/shelf-level micro-locations. Resolution prefers a spot
+  # over its zone ("desk-drawer-2", not just "office"). A tagged spot's
+  # surveyed position also calibrates cameras (anchor for free). Print the
+  # label with: apartment-tracker make-tag --id 13 --ident DRW/02 --caption "desk drawer 2"
+  # spots:
+  #   - {name: desk-drawer-2, tag: "aruco:13", position: [1.0, 1.0, 0.6], radius: 0.2}
+  #   - {name: shelf-b3,      tag: "aruco:14", position: [3.5, 0.2, 1.6], radius: 0.3}
   zones:
     - {name: living_room,     min: [0, 0, 0],        max: [5, 4, 2.6]}
     - {name: kitchen,         min: [5, 0, 0],        max: [8, 4, 2.6]}
@@ -34,6 +41,16 @@ items:
     name: Phone
     labels: [cell phone]
     tags: ["ble:BB:66:77:88:99:00"]
+
+# Families of visually identical items (storage boxes) distinguished only by
+# sequential tags: box-01..box-12 carrying aruco:20..31. The shared label lets
+# anonymous "storage box" detections refine whichever box is already tracked
+# nearby — never seed or hijack one.
+# item_sets:
+#   - id_prefix: box-
+#     count: 12
+#     first_tag_id: 20
+#     labels: [storage box]
 
 sensors:
   # USB webcam (or ESP32-CAM MJPEG URL) + ArUco detection, projected onto

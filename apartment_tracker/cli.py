@@ -48,7 +48,7 @@ def cmd_where(args) -> int:
     if entry.get("status") == "never_seen":
         print(f"{entry['name']}: never seen")
     else:
-        zone = entry.get("zone") or "outside known zones"
+        zone = entry.get("spot") or entry.get("zone") or "outside known zones"
         pos = entry.get("position")
         print(
             f"{entry['name']}: {zone} at ({pos[0]}, {pos[1]}, {pos[2]}) "
@@ -87,6 +87,30 @@ def _simulate_serve(args) -> int:
         pass
     finally:
         api.stop()
+    return 0
+
+
+def cmd_snapshot_map(args) -> int:
+    """Render the map overlay to SVG — from a live tracker or the simulation."""
+    from apartment_tracker.render import map_svg
+
+    if args.url:
+        req = urllib.request.Request(f"{args.url.rstrip('/')}/overlay/map",
+                                     headers=_auth_headers(args))
+        with urllib.request.urlopen(req, timeout=10) as r:
+            overlay = json.loads(r.read())
+    else:
+        from apartment_tracker.overlay import map_overlay
+        from apartment_tracker.simulate import build_simulation
+
+        tracker, state = build_simulation(seed=args.seed)
+        for _ in range(args.ticks):
+            state.tick()
+            tracker.step()
+        overlay = map_overlay(tracker)
+    with open(args.output, "w", encoding="utf-8") as f:
+        f.write(map_svg(overlay))
+    print(args.output)
     return 0
 
 
@@ -206,6 +230,27 @@ def cmd_make_anchor(args) -> int:
     return 0
 
 
+def cmd_make_tag(args) -> int:
+    """Generate a styled, printable fiducial label (SVG)."""
+    from apartment_tracker.tags import marker_bits, tag_svg
+
+    try:
+        bits = marker_bits(args.dictionary, args.id)
+    except RuntimeError as e:
+        print(e, file=sys.stderr)
+        return 1
+    ident = args.ident or f"TAG/{args.id:02d}"
+    svg = tag_svg(bits, ident, caption=args.caption, palette=args.palette,
+                  size_mm=args.size_mm)
+    out = args.output or f"tag-{args.id}.svg"
+    with open(out, "w", encoding="utf-8") as f:
+        f.write(svg)
+    print(out)
+    print(f'# config: tags: ["aruco:{args.id}"]  (item)  or  '
+          f'{{tag: "aruco:{args.id}", ...}}  (spot/anchor)', file=sys.stderr)
+    return 0
+
+
 def cmd_calibrate_cameras(args) -> int:
     import yaml
 
@@ -273,6 +318,14 @@ def main(argv: list[str] | None = None) -> int:
     simp.add_argument("--port", type=int, default=8080)
     simp.set_defaults(fn=cmd_simulate)
 
+    snapp = sub.add_parser("snapshot-map", help="render the map overlay to an SVG file")
+    snapp.add_argument("-o", "--output", default="map.svg")
+    snapp.add_argument("--url", help="running tracker base URL (default: run the simulation)")
+    snapp.add_argument("--token", help=f"API token (or set ${TOKEN_ENV})")
+    snapp.add_argument("--ticks", type=int, default=120)
+    snapp.add_argument("--seed", type=int, default=1)
+    snapp.set_defaults(fn=cmd_snapshot_map)
+
     plugp = sub.add_parser("plugins", help="list available plugins")
     plugp.set_defaults(fn=cmd_plugins)
 
@@ -282,6 +335,16 @@ def main(argv: list[str] | None = None) -> int:
     ancp.add_argument("--pixels", type=int, default=800)
     ancp.add_argument("-o", "--output")
     ancp.set_defaults(fn=cmd_make_anchor)
+
+    tagp = sub.add_parser("make-tag", help="generate a styled printable fiducial label (SVG)")
+    tagp.add_argument("--id", type=int, required=True, help="ArUco marker id")
+    tagp.add_argument("--ident", help='big label text, e.g. "BOX/07" or "DRW/02"')
+    tagp.add_argument("--caption", default="", help="vertical rail text, e.g. drawer name")
+    tagp.add_argument("--palette", default="signal", choices=["signal", "cyan", "magenta", "acid"])
+    tagp.add_argument("--dictionary", default="DICT_4X4_50")
+    tagp.add_argument("--size-mm", type=float, default=60.0, help="printed width")
+    tagp.add_argument("-o", "--output")
+    tagp.set_defaults(fn=cmd_make_tag)
 
     calp = sub.add_parser(
         "calibrate-cameras",

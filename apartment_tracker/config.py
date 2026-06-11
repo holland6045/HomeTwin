@@ -70,13 +70,16 @@ def load_config(path: str | Path) -> AppConfig:
     with open(path, encoding="utf-8") as f:
         raw = yaml.safe_load(f) or {}
 
-    world = World.from_config(raw.get("world", {}).get("zones", []))
-    items = ItemRegistry.from_config(raw.get("items", []))
+    world_cfg = raw.get("world", {})
+    world = World.from_config(world_cfg.get("zones", []), world_cfg.get("spots", []))
+    items = ItemRegistry.from_config(raw.get("items", []), raw.get("item_sets", []))
     sensors = [build_sensor(c) for c in raw.get("sensors", [])]
 
-    anchors = {
-        str(a["tag"]): tuple(a["position"]) for a in raw.get("world", {}).get("anchors", [])
-    }
+    anchors = {str(a["tag"]): tuple(a["position"]) for a in world_cfg.get("anchors", [])}
+    # a tagged spot is a surveyed fixed point: it calibrates cameras for free
+    for spot in world.spots:
+        if spot.tag:
+            anchors.setdefault(str(spot.tag), tuple(spot.position))
     for sensor in sensors:
         if anchors and hasattr(sensor, "attach_anchors"):
             sensor.attach_anchors(anchors)

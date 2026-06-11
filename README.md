@@ -135,6 +135,18 @@ tomography heat map, zones, presence — as a Three.js scene composited
 or over a ground grid otherwise. Renderer is lazy-loaded client-side; the
 tracker host never pays for it.
 
+**Spots & identical items:** `world.spots` mark micro-locations — an
+individual drawer, shelf, or bin — so answers read "desk-drawer-2" instead
+of "office"; a tagged spot's surveyed position doubles as a camera
+calibration anchor. `item_sets` bulk-register families of visually
+identical items (storage boxes) distinguished only by sequential tags;
+anonymous sightings of the shared label refine the gated nearest existing
+track and can never seed or hijack one. `apartment-tracker make-tag`
+prints designed fiducial labels (dark plate, neon accent, hazard stripes,
+mono ID type — functional ArUco core in vector SVG).
+`apartment-tracker snapshot-map` renders the live map overlay to SVG for
+headless previews.
+
 **Calibration anchors (optional):** printed ArUco blocks at surveyed
 positions (`apartment-tracker make-anchor`, `world.anchors` in config)
 give every camera that sees one a shared fixed reference: drift is

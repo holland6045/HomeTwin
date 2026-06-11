@@ -19,7 +19,7 @@ from apartment_tracker.sensors.ble import BLEScannerSensor, RSSISource
 from apartment_tracker.sensors.camera import CameraGeometry, CameraSensor
 from apartment_tracker.sensors.tomography import LinkSource, TomographySensor
 from apartment_tracker.tracker import Tracker
-from apartment_tracker.world import World, Zone
+from apartment_tracker.world import Spot, World, Zone
 
 WALLET_MAC = "AA:11:22:33:44:55"
 PHONE_MAC = "BB:66:77:88:99:00"
@@ -155,7 +155,9 @@ def build_simulation(seed: int = 1) -> tuple[Tracker, SimWorldState]:
             Zone("kitchen", (5, 0, 0), (8, 4, 2.6)),
             Zone("kitchen_counter", (6, 0.5, 0.8), (7.5, 1.5, 1.1)),
             Zone("sofa", (1.5, 2.8, 0.3), (3.0, 3.8, 0.7)),
-        ]
+        ],
+        # spot-level precision: the tray on the counter where keys belong
+        [Spot("counter-tray", (6.5, 1.0, 0.9), radius=0.35)],
     )
     items = ItemRegistry()
     items.add(Item("keys", "House keys", labels=["keys"], tag_ids=["aruco:7"]))

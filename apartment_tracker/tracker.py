@@ -50,7 +50,10 @@ class Tracker:
                 log.info("restored %d track(s) from %s", restored, cfg.state_path)
             # restored locations are the zone baseline, not "arrival" events
             for t in self.engine.tracks.values():
-                self._zones[t.item_id] = cfg.world.locate(t.position)
+                self._zones[t.item_id] = (
+                    cfg.world.locate(t.position),
+                    cfg.world.locate_spot(t.position),
+                )
 
     def save_state(self) -> None:
         if self.store:
@@ -119,17 +122,20 @@ class Tracker:
             if not trail or math.dist(trail[-1]["pos"], pos) >= TRAIL_MIN_STEP_M:
                 trail.append({"t": track.last_update, "pos": list(pos)})
             zone = self.cfg.world.locate(track.position)
+            spot = self.cfg.world.locate_spot(track.position)
             prev = self._zones.get(item_id)
-            if item_id in self._zones and zone != prev:
+            if item_id in self._zones and (zone, spot) != prev:
                 self.events.append(
                     {
                         "timestamp": track.last_update,
                         "item_id": item_id,
-                        "from_zone": prev,
+                        "from_zone": prev[0],
                         "to_zone": zone,
+                        "from_spot": prev[1],
+                        "to_spot": spot,
                     }
                 )
-            self._zones[item_id] = zone
+            self._zones[item_id] = (zone, spot)
 
     def run(self) -> None:
         period = 1.0 / self.cfg.poll_hz

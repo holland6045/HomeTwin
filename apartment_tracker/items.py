@@ -23,7 +23,7 @@ class ItemRegistry:
     def __init__(self) -> None:
         self._items: dict[str, Item] = {}
         self._by_tag: dict[str, str] = {}
-        self._by_label: dict[str, str] = {}
+        self._by_label: dict[str, list[str]] = {}
 
     def add(self, item: Item) -> None:
         if item.item_id in self._items:
@@ -32,7 +32,7 @@ class ItemRegistry:
         for tag in item.tag_ids:
             self._by_tag[tag] = item.item_id
         for label in item.labels:
-            self._by_label[label] = item.item_id
+            self._by_label.setdefault(label, []).append(item.item_id)
 
     def tag_item(self, item_id: str, tag_id: str) -> None:
         """Manually attach a new tag to an existing item at runtime."""
@@ -47,13 +47,22 @@ class ItemRegistry:
         return self._by_tag.get(tag_id)
 
     def resolve_label(self, label: str) -> str | None:
-        return self._by_label.get(label)
+        """Unambiguous label -> item; None when zero or several items share it
+        (identical storage boxes — the fusion engine then associates by
+        proximity to existing tracks instead)."""
+        candidates = self._by_label.get(label, [])
+        return candidates[0] if len(candidates) == 1 else None
+
+    def label_candidates(self, label: str) -> list[str]:
+        return list(self._by_label.get(label, []))
 
     def all(self) -> list[Item]:
         return list(self._items.values())
 
     @classmethod
-    def from_config(cls, item_cfgs: list[dict]) -> "ItemRegistry":
+    def from_config(
+        cls, item_cfgs: list[dict], set_cfgs: list[dict] | None = None
+    ) -> "ItemRegistry":
         reg = cls()
         for c in item_cfgs:
             reg.add(
@@ -64,4 +73,22 @@ class ItemRegistry:
                     tag_ids=[str(t) for t in c.get("tags", [])],
                 )
             )
+        # item_sets: families of visually identical items (storage boxes)
+        # distinguished only by sequential tags
+        for s in set_cfgs or []:
+            count = int(s["count"])
+            first = int(s.get("first_tag_id", 0))
+            kind = s.get("tag_kind", "aruco")
+            width = max(2, len(str(count)))
+            prefix = s["id_prefix"]
+            name_prefix = s.get("name_prefix", prefix.replace("-", " ").strip().title() + " ")
+            for i in range(1, count + 1):
+                reg.add(
+                    Item(
+                        item_id=f"{prefix}{i:0{width}d}",
+                        name=f"{name_prefix}{i:0{width}d}",
+                        labels=list(s.get("labels", [])),
+                        tag_ids=[f"{kind}:{first + i - 1}"],
+                    )
+                )
         return reg
