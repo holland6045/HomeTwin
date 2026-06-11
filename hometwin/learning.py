@@ -96,7 +96,7 @@ def collect_ble_samples(tracker) -> None:
         if getattr(sensor, "last_rssi", None) is not None and hasattr(sensor, "model"):
             scanners.append(sensor)
         # bridge-fed MCU scanners learn too, each with its own model
-        scanners.extend(getattr(sensor, "remote_scanners", {}).values())
+        scanners.extend(list(getattr(sensor, "remote_scanners", {}).values()))
     for scanner in scanners:
         if scanner.position is None:
             continue

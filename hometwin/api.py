@@ -228,6 +228,8 @@ def make_handler(tracker: Tracker, policy: AuthPolicy):
                     body = json.loads(self.rfile.read(length) or b"{}")
                     tag = str(body["tag"])
                     position = tuple(float(v) for v in body["position"])
+                    if len(position) != 3:
+                        raise ValueError("position must have 3 components")
                 except (KeyError, TypeError, ValueError):
                     self._send(400, {"error": "need {tag, position: [x,y,z]}"})
                     return

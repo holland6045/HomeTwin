@@ -15,7 +15,6 @@ from hometwin.items import Item, ItemRegistry
 from hometwin.movables import CLOSED_REF_STREAK, Movable, MovableRegistry
 from hometwin.observations import Detection
 from hometwin.sensors.camera import CameraGeometry, CameraSensor
-from hometwin.sensors.mock import ScriptedSensor
 from hometwin.tracker import Tracker
 from hometwin.world import World, Zone
 

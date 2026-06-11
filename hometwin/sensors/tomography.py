@@ -17,7 +17,6 @@ transport works: serial, ESP-NOW gateway, the network bridge, MQTT.
 from __future__ import annotations
 
 import math
-import time
 
 from hometwin.observations import AreaObservation
 from hometwin.registry import register

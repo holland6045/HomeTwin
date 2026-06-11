@@ -19,7 +19,7 @@ Movable tags are excluded from the anchor map by construction.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 OPEN_ABOVE = 0.2  # hysteresis: open when fraction rises above,
 CLOSE_BELOW = 0.1  # closed when it falls below

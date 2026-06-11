@@ -85,7 +85,6 @@ def test_printed_tag_artwork_is_machine_readable():
 
 def test_capture_snapshot_writes_real_frame(tmp_path):
     """capture-snapshots works against any frame source producing arrays."""
-    from hometwin.cli import main
 
     frame = frame_with_marker(7, (640, 480))
     cfg = tmp_path / "c.yaml"

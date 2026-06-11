@@ -20,6 +20,7 @@ chipset, ...) are stored verbatim — the schema belongs to the node.
 from __future__ import annotations
 
 import math
+import threading
 import time
 from collections import Counter, deque
 
@@ -68,8 +69,10 @@ class DeviceProfile:
         self.ping_sent: dict[int, float] = {}
         self.rtts_ms: list[float] = []
         self.bench_started: float | None = None
+        self._lock = threading.Lock()  # several connections may share an id
 
     def note_message(self, msg: dict) -> None:
+      with self._lock:
         self.messages += 1
         self.types[msg.get("type", "?")] += 1
         self.arrivals.append(self.clock())
@@ -90,6 +93,7 @@ class DeviceProfile:
         return lines
 
     def note_pong(self, seq: int) -> None:
+      with self._lock:
         sent = self.ping_sent.pop(int(seq), None)
         if sent is not None:
             self.rtts_ms.append((self.clock() - sent) * 1000.0)

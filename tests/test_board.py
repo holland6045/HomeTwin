@@ -119,7 +119,6 @@ def make_calibrated_cam():
 
 def board_world_corners(origin, yaw_deg, ids):
     """Project board markers placed at an arbitrary world pose."""
-    import numpy as np
 
     yaw = math.radians(yaw_deg)
     c, s = math.cos(yaw), math.sin(yaw)

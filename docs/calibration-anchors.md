@@ -154,3 +154,22 @@ Guarantees:
   error in the bundled two-camera test), which is exactly what
   multi-camera triangulation needs — absolute world accuracy still comes
   from anchors or the splat calibration.
+
+## The board as a portable instrument (world-agnostic)
+
+Defining the origin is just one mode. A *calibrated* camera can measure
+the board instead (`hometwin board-check -c config.yaml`): lay the sheet
+anywhere — counter, shelf, floor — and get back its world position,
+**the surface plane z** (set your z=0, or dial in counter/shelf heights
+for `surface_z` and spots), tilt, and ready-to-paste anchor snippets at
+the measured marker positions. Dropping a new anchor becomes: lay the
+board where you want it, run board-check, paste — or click the dashboard
+map (coordinates copied) and `POST /anchors`. For splat users, the same
+markers double as `calibrate-cameras` reference points clicked in any
+splat viewer.
+
+Honesty note baked into the tool: monocular planar scale is unobservable
+(a wrongly-scaled print solves to a self-consistent wrong depth), so the
+print-scale check only reports when you give it an independent
+constraint — `--surface-z` (floor = 0, or a height you've measured
+once). Off by >3%, it tells you the `--marker-mm` to pass.

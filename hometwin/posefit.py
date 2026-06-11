@@ -204,7 +204,7 @@ def locate_board(
         raise RuntimeError(
             "pose bootstrap requires opencv: pip install hometwin[vision]"
         ) from e
-    from hometwin.board import SPACING_MM, board_layout, board_object_points
+    from hometwin.board import board_layout, board_object_points
 
     ids = sorted(detections)
     if not ids:

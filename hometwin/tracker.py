@@ -52,6 +52,7 @@ class Tracker:
         # RLock: overlay/snapshot helpers nest under step()'s critical section
         self._lock = threading.RLock()
         self._pool: ThreadPoolExecutor | None = None
+        self._inflight: dict = {}
         if getattr(cfg, "parallel_polling", True) and len(cfg.sensors) > 1:
             from hometwin.accel import poll_workers
 
@@ -112,7 +113,17 @@ class Tracker:
                 except Exception:
                     log.exception("sensor %s poll failed", sensor.sensor_id)
             return results
-        futures = [(s, self._pool.submit(s.poll)) for s in self.sensors]
+        # a sensor whose previous poll is still running (hung MJPEG read)
+        # is skipped this round rather than stacking tasks until the pool
+        # starves every healthy sensor
+        futures = []
+        for s in self.sensors:
+            prev = self._inflight.get(s.sensor_id)
+            if prev is not None and not prev.done():
+                continue
+            fut = self._pool.submit(s.poll)
+            self._inflight[s.sensor_id] = fut
+            futures.append((s, fut))
         results = []
         for sensor, fut in futures:
             try:
@@ -125,7 +136,7 @@ class Tracker:
         """Poll all sensors once and fuse. Returns observations processed."""
         count = 0
         touched: set[str] = set()
-        for sensor, batch in self._poll_all():
+        for _sensor, batch in self._poll_all():
             for obs in batch:
                 count += 1
                 # remote cameras report movable tags as bearings: route to

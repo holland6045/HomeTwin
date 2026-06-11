@@ -19,7 +19,6 @@ Two projection modes per camera (config `mode`):
 from __future__ import annotations
 
 import math
-import time
 
 from hometwin.observations import (
     BearingObservation,

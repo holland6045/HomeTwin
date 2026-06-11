@@ -131,7 +131,7 @@ def map_overlay(tracker) -> dict:
         "devices": [
             prof.as_dict()
             for sensor in tracker.sensors
-            for prof in getattr(sensor, "profiles", {}).values()
+            for prof in list(getattr(sensor, "profiles", {}).values())
         ],
         "device_tags": (
             tracker.cfg.device_tags.snapshot()

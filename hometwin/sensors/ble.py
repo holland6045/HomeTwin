@@ -12,7 +12,6 @@ rssi(d) = tx_power_at_1m - 10 * n * log10(d)
 from __future__ import annotations
 
 import math
-import time
 
 from hometwin.observations import RangeObservation
 from hometwin.registry import register

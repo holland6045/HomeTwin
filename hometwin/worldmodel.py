@@ -23,6 +23,7 @@ from __future__ import annotations
 import gzip
 import json
 import math
+import threading
 from pathlib import Path
 
 VOXEL_M = 0.12
@@ -45,6 +46,8 @@ class WorldModel:
         self.voxels: dict[tuple[int, int, int], list[float]] = {}  # key -> [weight, last_ts]
         self.observations = 0
         self._since_compact = 0
+        # tracker thread writes, API threads read/sort: guard the dict
+        self._lock = threading.Lock()
 
     def _key(self, p) -> tuple[int, int, int]:
         return (
@@ -55,6 +58,10 @@ class WorldModel:
 
     def add_point(self, p, ts: float, weight: float = 1.0) -> None:
         key = self._key(p)
+        with self._lock:
+            self._add_locked(key, ts, weight)
+
+    def _add_locked(self, key, ts: float, weight: float) -> None:
         cell = self.voxels.get(key)
         if cell is None:
             self.voxels[key] = [weight, ts]
@@ -65,18 +72,23 @@ class WorldModel:
         self.observations += 1
         self._since_compact += 1
         if self._since_compact >= COMPACT_EVERY:
-            self.decay_and_compact(ts)
+            self._decay_locked(ts)
 
     def maintenance_now(self, wall: float) -> float:
         """Clock to decay against: wall time in live operation, the model's
         own newest timestamp when running on a synthetic/replay clock —
         otherwise one save would decay a sim-built model to dust."""
-        newest = max((c[1] for c in self.voxels.values()), default=wall)
+        with self._lock:
+            newest = max((c[1] for c in self.voxels.values()), default=wall)
         return newest if wall - newest > 3600.0 else wall
 
     def decay_and_compact(self, now: float) -> int:
         """Fade everything to `now`, drop floaters, enforce the cap.
         Returns voxels removed."""
+        with self._lock:
+            return self._decay_locked(now)
+
+    def _decay_locked(self, now: float) -> int:
         removed = 0
         for key in list(self.voxels):
             cell = self.voxels[key]
@@ -95,14 +107,16 @@ class WorldModel:
 
     def point_cloud(self, max_points: int = 30_000) -> list[list[float]]:
         """[x, y, z, weight] at voxel centers, heaviest first."""
-        cells = sorted(self.voxels.items(), key=lambda kv: kv[1][0], reverse=True)
+        with self._lock:
+            items = [(k, w[0]) for k, w in self.voxels.items()]
+        cells = sorted(items, key=lambda kv: kv[1], reverse=True)
         half = self.voxel_m / 2.0
         return [
             [
                 round(k[0] * self.voxel_m + half, 3),
                 round(k[1] * self.voxel_m + half, 3),
                 round(k[2] * self.voxel_m + half, 3),
-                round(w[0], 3),
+                round(w, 3),
             ]
             for k, w in cells[:max_points]
         ]
@@ -116,11 +130,13 @@ class WorldModel:
         }
 
     def save(self, path: str | Path) -> None:
+        with self._lock:
+            rows = [[*k, w, ts] for k, (w, ts) in self.voxels.items()]
         payload = {
             "voxel_m": self.voxel_m,
             "half_life_s": self.half_life_s,
             "observations": self.observations,
-            "voxels": [[*k, w, ts] for k, (w, ts) in self.voxels.items()],
+            "voxels": rows,
         }
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
