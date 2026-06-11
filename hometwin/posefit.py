@@ -98,6 +98,73 @@ def camera_pose_from_marker(
     return pose
 
 
+def camera_pose_from_board(
+    detections: dict[int, list[tuple[float, float]]],
+    image_size: tuple[int, int],
+    hfov_deg: float,
+    scale: float = 1.0,
+    board_z: float = 0.0,
+) -> dict:
+    """Solve the camera pose from origin-board detections.
+
+    detections: {marker_id: 4 corner pixels in ArUco order} for any subset
+    of the board's markers — one marker works, three give 12 correspondences
+    and an unambiguous frame. The board defines the world: its origin marker
+    center is (0, 0, board_z).
+    """
+    try:
+        import cv2
+        import numpy as np
+    except ImportError as e:
+        raise RuntimeError(
+            "pose bootstrap requires opencv: pip install hometwin[vision]"
+        ) from e
+    from hometwin.board import board_object_points
+
+    ids = sorted(detections)
+    if not ids:
+        raise ValueError("no board markers detected")
+    obj = np.array(
+        [pt for quad in board_object_points(ids, scale) for pt in quad],
+        dtype=np.float64,
+    )  # z = 0 plane: IPPE-friendly as-is
+    img = np.ascontiguousarray(
+        np.array([pt for mid in ids for pt in detections[mid]], dtype=np.float64)
+    ).reshape(-1, 1, 2)
+    w, h = image_size
+    fx = w / (2.0 * math.tan(math.radians(hfov_deg) / 2.0))
+    K = np.array([[fx, 0, w / 2.0], [0, fx, h / 2.0], [0, 0, 1]], dtype=np.float64)
+
+    solutions = []
+    try:
+        n_sol, rvecs, tvecs, _ = cv2.solvePnPGeneric(
+            obj, img, K, None, flags=cv2.SOLVEPNP_IPPE
+        )
+        solutions += list(zip(rvecs, tvecs))
+    except cv2.error:
+        pass
+    ok, rvec_i, tvec_i = cv2.solvePnP(obj, img, K, None, flags=cv2.SOLVEPNP_ITERATIVE)
+    if ok:
+        solutions.append((rvec_i, tvec_i))
+    if not solutions:
+        raise ValueError("PnP solve failed — board corners degenerate?")
+    candidates = []
+    for rvec, tvec in solutions:
+        R, _ = cv2.Rodrigues(rvec)
+        proj, _ = cv2.projectPoints(obj, rvec, tvec, K, None)
+        err = float(np.linalg.norm(proj.reshape(-1, 2) - img.reshape(-1, 2), axis=1).mean())
+        # board plane sits at board_z in world: shift the translation
+        t_w = tvec.flatten() - R @ np.array([0.0, 0.0, board_z])
+        pose = camera_pose(rotmat_to_qvec(R.tolist()), tuple(t_w))
+        candidates.append((err, pose))
+    above = [c for c in candidates if c[1]["position"][2] > board_z]
+    err, pose = min(above or candidates, key=lambda c: c[0])
+    pose["hfov_deg"] = hfov_deg
+    pose["reprojection_error_px"] = round(err, 3)
+    pose["markers_used"] = ids
+    return pose
+
+
 def average_poses(poses: list[dict]) -> dict:
     """Average several single-frame solves (angles via vector mean)."""
     n = len(poses)

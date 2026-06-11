@@ -3,9 +3,10 @@
 #   pip install -e .[vision]
 #   hometwin make-anchor --id 7 -o tag-keys.png     # print, tape to your keys
 #   hometwin webcam-test                            # smoke test: see detections
-#   hometwin make-anchor --id 100 -o setup.png      # print ~100 mm wide, lay flat
-#   hometwin webcam-setup --marker-mm <printed black square width>
+#   hometwin make-board -o board.svg                # print at 100%, lay flat
+#   hometwin webcam-setup --board
 #       -> prints this camera block with the measured pose; paste it below
+#       (single-marker fallback: make-anchor --id 100 + webcam-setup --marker-mm N)
 #   hometwin run -c configs/webcam-quickstart.yaml  # then open http://127.0.0.1:8080/
 #   hometwin where keys
 #

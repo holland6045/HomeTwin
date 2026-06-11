@@ -58,7 +58,8 @@ pip install -e .[ml]        # optional: ONNX object detection
 # live on your PC with its webcam:
 hometwin make-anchor --id 7 -o tag-keys.png   # print, tape to your keys
 hometwin webcam-test                          # smoke test: detections + fps
-hometwin webcam-setup --marker-mm 100         # flat marker -> camera pose (PnP)
+hometwin make-board -o board.svg && hometwin webcam-setup --board  # lay the
+#   printed sheet flat: it IS the world origin — no coordinates, no tape measure
 hometwin run -c configs/webcam-quickstart.yaml  # dashboard on :8080
 
 # zero-hardware demo: synthetic apartment with all three modalities

@@ -224,9 +224,19 @@ def cmd_webcam_setup(args) -> int:
         return 1
     det = ArucoDetector(dictionary=args.dictionary)
     detector = det._detector
-    tag = f"aruco:{args.marker_id}"
-    print(f"lay marker {args.marker_id} FLAT at world {args.marker_pos}, top edge "
-          f"toward +y; collecting {args.frames} sightings...", file=sys.stderr)
+    if args.board:
+        from hometwin.board import MARKER_IDS, MARKER_MM
+
+        from hometwin.posefit import camera_pose_from_board
+
+        scale = (args.marker_mm / MARKER_MM) if args.marker_mm else 1.0
+        wanted = set(MARKER_IDS)
+        print(f"lay the origin board FLAT in view; collecting {args.frames} "
+              f"sightings...", file=sys.stderr)
+    else:
+        wanted = {args.marker_id}
+        print(f"lay marker {args.marker_id} FLAT at world {args.marker_pos}, top edge "
+              f"toward +y; collecting {args.frames} sightings...", file=sys.stderr)
     poses = []
     t0 = _t.time()
     try:
@@ -237,10 +247,19 @@ def cmd_webcam_setup(args) -> int:
             corners, ids, _ = detector.detectMarkers(frame)
             if ids is None:
                 continue
+            h, w = frame.shape[:2]
+            if args.board:
+                seen = {
+                    int(mid): [tuple(pt) for pt in quad[0]]
+                    for quad, mid in zip(corners, ids.flatten())
+                    if int(mid) in wanted
+                }
+                if seen:
+                    poses.append(camera_pose_from_board(seen, (w, h), args.hfov, scale))
+                continue
             for quad, marker_id in zip(corners, ids.flatten()):
                 if int(marker_id) != args.marker_id:
                     continue
-                h, w = frame.shape[:2]
                 poses.append(camera_pose_from_marker(
                     [tuple(pt) for pt in quad[0]], (w, h), args.hfov,
                     tuple(args.marker_pos), args.marker_mm / 1000.0))
@@ -307,6 +326,25 @@ def cmd_webcam_test(args) -> int:
     print(f"# {frames} frames in {dt:.1f}s ({frames / dt:.1f} fps), "
           f"{hits} tag detections", file=sys.stderr)
     return 0 if frames else 1
+
+
+def cmd_make_board(args) -> int:
+    """Generate the printable origin board (lay flat = world origin set)."""
+    from hometwin.board import MARKER_IDS, board_svg
+    from hometwin.tags import marker_bits
+
+    try:
+        bits = {mid: marker_bits(args.dictionary, mid) for mid in MARKER_IDS}
+    except RuntimeError as e:
+        print(e, file=sys.stderr)
+        return 1
+    out = args.output or "origin-board.svg"
+    with open(out, "w", encoding="utf-8") as f:
+        f.write(board_svg(bits))
+    print(out)
+    print("# print at 100% scale, lay flat in camera view, then:\n"
+          "#   hometwin webcam-setup --board", file=sys.stderr)
+    return 0
 
 
 def cmd_make_anchor(args) -> int:
@@ -446,6 +484,9 @@ def main(argv: list[str] | None = None) -> int:
     setp.add_argument("--marker-id", type=int, default=100)
     setp.add_argument("--marker-mm", type=float, default=100.0,
                       help="printed marker side length (black border included)")
+    setp.add_argument("--board", action="store_true",
+                      help="solve against the printed origin board (make-board); "
+                           "no coordinates needed, --marker-mm only if not printed at 100%%")
     setp.add_argument("--marker-pos", type=float, nargs=3, default=[0.0, 0.0, 0.0],
                       metavar=("X", "Y", "Z"), help="marker center in world metres")
     setp.add_argument("--hfov", type=float, default=70.0, help="camera horizontal FOV")
@@ -459,6 +500,12 @@ def main(argv: list[str] | None = None) -> int:
     webp.add_argument("--seconds", type=int, default=15)
     webp.add_argument("--dictionary", default="DICT_4X4_250")
     webp.set_defaults(fn=cmd_webcam_test)
+
+    brdp = sub.add_parser("make-board",
+                          help="printable origin board: lay flat, it IS the world origin")
+    brdp.add_argument("--dictionary", default="DICT_4X4_250")
+    brdp.add_argument("-o", "--output")
+    brdp.set_defaults(fn=cmd_make_board)
 
     ancp = sub.add_parser("make-anchor", help="generate a printable ArUco calibration target")
     ancp.add_argument("--id", type=int, required=True, help="marker id (use 100+ for anchors)")
