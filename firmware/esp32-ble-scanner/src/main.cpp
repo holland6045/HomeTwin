@@ -32,6 +32,35 @@ static void ensureLinks() {
 #ifdef BRIDGE_TOKEN
             client.print("{\"auth\":\"" BRIDGE_TOKEN "\"}\n");
 #endif
+            // onboarding: announce caps; the bridge benchmarks the link
+            char hello[160];
+            snprintf(hello, sizeof(hello),
+                     "{\"type\":\"hello\",\"sensor_id\":\"%s\",\"chip\":\"%s\","
+                     "\"fw\":\"ble-scanner-1\",\"radio\":\"esp32-ble\"}\n",
+                     SENSOR_ID, ESP.getChipModel());
+            client.print(hello);
+        }
+    }
+}
+
+static void answerPings() {
+    static char buf[128];
+    static size_t len = 0;
+    while (client.available()) {
+        char c = client.read();
+        if (c == '\n') {
+            buf[len] = 0;
+            int seq;
+            if (sscanf(buf, "{\"type\": \"ping\", \"seq\": %d}", &seq) == 1) {
+                char pong[96];
+                snprintf(pong, sizeof(pong),
+                         "{\"type\":\"pong\",\"sensor_id\":\"%s\",\"seq\":%d}\n",
+                         SENSOR_ID, seq);
+                client.print(pong);
+            }
+            len = 0;
+        } else if (len < sizeof(buf) - 1) {
+            buf[len++] = c;
         }
     }
 }
@@ -51,5 +80,6 @@ void setup() {
 
 void loop() {
     ensureLinks();
-    delay(500);
+    answerPings();
+    delay(100);
 }

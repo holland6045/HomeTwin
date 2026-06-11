@@ -134,6 +134,7 @@ class NetworkBridgeSensor(SensorAdapter):
         self.auth_token = auth_token
         self._queue: deque[Observation] = deque(maxlen=max_queue)
         self.remote_scanners: dict[str, RemoteScanner] = {}
+        self.profiles: dict[str, object] = {}  # sensor_id -> DeviceProfile
         self._lock = threading.Lock()
         self._server: socketserver.ThreadingTCPServer | None = None
         self._thread: threading.Thread | None = None
@@ -156,11 +157,43 @@ class NetworkBridgeSensor(SensorAdapter):
             scanner = self.remote_scanners[sid] = RemoteScanner(sid, model)
         return scanner
 
-    def handle_line(self, line: str) -> None:
+    def _profile(self, sensor_id: str):
+        from hometwin.onboarding import DeviceProfile
+
+        prof = self.profiles.get(sensor_id)
+        if prof is None:
+            prof = self.profiles[sensor_id] = DeviceProfile(sensor_id, clock=self.clock)
+        return prof
+
+    def handle_line(self, line: str, reply=None) -> None:
+        """Process one node line. `reply(text)` writes back on the same
+        socket (echo benchmark); tests may omit it."""
         try:
-            obs = parse_message(
-                json.loads(line), self.sensor_id, self.model, self._remote_scanner
-            )
+            msg = json.loads(line)
+        except ValueError:
+            self.dropped += 1
+            return
+        if not isinstance(msg, dict):
+            self.dropped += 1
+            return
+        sensor_id = msg.get("sensor_id", self.sensor_id)
+        prof = self._profile(sensor_id)
+        prof.note_message(msg)
+        kind = msg.get("type")
+        if kind == "hello":
+            # onboarding: characterize the node with an echo burst
+            for ping in prof.start_benchmark(msg):
+                if reply is not None:
+                    reply(ping)
+            return
+        if kind == "pong":
+            try:
+                prof.note_pong(int(msg.get("seq", -1)))
+            except (TypeError, ValueError):
+                self.dropped += 1
+            return
+        try:
+            obs = parse_message(msg, self.sensor_id, self.model, self._remote_scanner)
         except (ValueError, KeyError, TypeError):
             self.dropped += 1
             return
@@ -194,7 +227,13 @@ class NetworkBridgeSensor(SensorAdapter):
                             return
                         authed = True
                         continue
-                    bridge.handle_line(line)
+                    bridge.handle_line(line, reply=self._reply)
+
+            def _reply(self, text: str) -> None:
+                try:
+                    self.wfile.write(text.encode() + b"\n")
+                except OSError:
+                    pass  # node hung up mid-benchmark: profile shows the loss
 
         socketserver.ThreadingTCPServer.allow_reuse_address = True
         self._server = socketserver.ThreadingTCPServer((self.host, self.port), Handler)

@@ -117,6 +117,11 @@ def map_overlay(tracker) -> dict:
         "movables": (
             tracker.cfg.movables.snapshot() if getattr(tracker.cfg, "movables", None) else []
         ),
+        "devices": [
+            prof.as_dict()
+            for sensor in tracker.sensors
+            for prof in getattr(sensor, "profiles", {}).values()
+        ],
         "device_tags": (
             tracker.cfg.device_tags.snapshot()
             if getattr(tracker.cfg, "device_tags", None)
