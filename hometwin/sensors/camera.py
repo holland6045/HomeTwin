@@ -136,10 +136,27 @@ class CameraSensor(SensorAdapter):
         self.anchor_correct = anchor_correct
         self.calibrator = None
         self.movables = None
+        self._soft_refs: dict[str, tuple[tuple, float]] = {}
+
+    def _ensure_calibrator(self):
+        if self.calibrator is None:
+            from hometwin.anchors import AnchorCalibrator
+
+            self.calibrator = AnchorCalibrator(
+                self.geometry, {}, auto_correct=self.anchor_correct
+            )
+        return self.calibrator
 
     def attach_movables(self, registry) -> None:
         """Share the tracker-wide movable registry (doors/drawers)."""
         self.movables = registry
+
+    def update_soft_references(self, refs: dict[str, tuple[tuple, float]]) -> None:
+        """Fused tag positions qualified by the tracker as references:
+        {tag: (position, sigma_m)}. Refreshed every step; stale refs vanish."""
+        self._soft_refs = refs
+        if refs:
+            self._ensure_calibrator()
 
     def attach_anchors(self, anchors: dict[str, tuple[float, float, float]]) -> None:
         """Give this camera the world's calibration anchors (optional)."""
@@ -209,13 +226,24 @@ class CameraSensor(SensorAdapter):
             if self.movables and det.tag_id and self.movables.observe_ray(
                 det.tag_id, self.geometry.position, self.geometry.ray(*det.center), ts
             ):
-                continue  # door/drawer state tag, not a tracked item
+                # door/drawer tag, not an item — but at a confident mechanical
+                # limit its surveyed home doubles as a soft reference
+                home = self.movables.closed_reference(det.tag_id)
+                if home is not None:
+                    self._ensure_calibrator().observe_soft(
+                        det.tag_id, *det.center, ts, home, 0.03
+                    )
+                continue
             if (
                 self.calibrator
                 and det.tag_id
                 and self.calibrator.observe(det.tag_id, *det.center, ts)
             ):
                 continue  # calibration target, not a tracked item
+            if det.tag_id and det.tag_id in self._soft_refs:
+                pos, sigma_m = self._soft_refs[det.tag_id]
+                self._ensure_calibrator().observe_soft(det.tag_id, *det.center, ts, pos, sigma_m)
+                # fall through: still a tracked item observation
             obs = self.to_observation(det, ts)
             if obs is not None:
                 out.append(obs)

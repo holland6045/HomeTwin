@@ -124,3 +124,33 @@ do not slowly shear apart as individual cameras drift.
 
 One `world_to_pixel` + a few trig ops per anchor sighting, only on frames
 where a detector already found the marker. Nothing on the fusion path.
+
+## Soft references: every tag helps
+
+Non-anchor tags also contribute to camera registration — opportunistically
+and safely:
+
+- **Settled item tags.** When an item's fused position is tight
+  (σ < 0.2 m), stationary, and confirmed by enough observations from
+  *other* sensors, the tracker hands it to each camera as a soft
+  reference. A camera seeing that tag compares its sight ray against the
+  fused estimate and (with `anchor_correct`) folds the residual into its
+  pose, down-weighted by the reference's own angular uncertainty.
+- **Confidently-closed movables.** A drawer/door tag observed at its
+  mechanical home for several consecutive frames is momentarily a fixed
+  point; its surveyed `home` then acts as a soft reference. Any sighting
+  away from home breaks the streak — a drifted camera that makes "closed"
+  look open simply gets no reference (fail-safe, never fail-wrong).
+
+Guarantees:
+
+- **No feedback loops**: a camera never receives a reference whose track
+  it produced alone (per-camera other-sensor observation minimum).
+- **Anchors always win**: soft corrections are variance-weighted below
+  surveyed anchors, and soft residuals are reported separately
+  (`soft_residual_deg`) without affecting the `healthy` flag.
+- **Consensus, not truth**: with no surveyed anchor in the loop, mutual
+  registration converges cameras toward agreement (halving relative
+  error in the bundled two-camera test), which is exactly what
+  multi-camera triangulation needs — absolute world accuracy still comes
+  from anchors or the splat calibration.

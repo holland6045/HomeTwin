@@ -163,6 +163,12 @@ height, and `--twin` repeats it at both ends for occlusion resistance.
 `hometwin snapshot-map` renders the live map overlay to SVG for
 headless previews.
 
+**Soft references:** even non-anchor tags improve multi-camera
+registration — settled item tags (tight, stationary, multi-sensor
+confirmed) and confidently-closed drawer/door tags act as opportunistic
+calibration references, variance-weighted below surveyed anchors and
+gated so no camera can calibrate against a track it produced alone.
+
 **Calibration anchors (optional):** printed ArUco blocks at surveyed
 positions (`hometwin make-anchor`, `world.anchors` in config)
 give every camera that sees one a shared fixed reference: drift is

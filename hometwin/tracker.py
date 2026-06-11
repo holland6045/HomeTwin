@@ -28,6 +28,11 @@ log = logging.getLogger("hometwin")
 EVENT_HISTORY = 500
 TRAIL_LENGTH = 200
 TRAIL_MIN_STEP_M = 0.15
+# soft-reference qualification: a tag teaches a camera only when its fused
+# estimate is tight, stationary, and substantially owed to OTHER sensors
+SOFT_REF_MAX_SIGMA_M = 0.2
+SOFT_REF_MAX_SPEED = 0.05
+SOFT_REF_MIN_OTHER_OBS = 10
 
 
 class Tracker:
@@ -123,7 +128,41 @@ class Tracker:
         self._record_zone_changes(touched)
         if self.cfg.movables is not None:
             self.events.extend(self.cfg.movables.drain_events())
+        self._push_soft_references()
         return count
+
+    def _push_soft_references(self) -> None:
+        """Well-localized item tags become shared references for cameras.
+
+        Anti-feedback gate: a camera only receives references whose tracks
+        are confirmed by enough observations from sensors OTHER than itself,
+        so no camera can calibrate against an estimate it produced alone.
+        """
+        cameras = [s for s in self.sensors if hasattr(s, "update_soft_references")]
+        if not cameras:
+            return
+        candidates = []
+        with self._lock:
+            for item in self.cfg.items.all():
+                track = self.engine.tracks.get(item.item_id)
+                if track is None or track.sigma_m > SOFT_REF_MAX_SIGMA_M:
+                    continue
+                speed = math.sqrt(sum(v * v for v in track.filter.x[3:6]))
+                if speed > SOFT_REF_MAX_SPEED:
+                    continue
+                tags = [tag for tag in item.tag_ids if tag.startswith("aruco:")]
+                if tags:
+                    candidates.append(
+                        (tags, track.position, track.sigma_m, dict(track.contributors))
+                    )
+        for cam in cameras:
+            refs = {}
+            for tags, pos, sigma, contributors in candidates:
+                others = sum(n for sid, n in contributors.items() if sid != cam.sensor_id)
+                if others >= SOFT_REF_MIN_OTHER_OBS:
+                    for tag in tags:
+                        refs[tag] = (pos, sigma)
+            cam.update_soft_references(refs)
 
     def _record_zone_changes(self, item_ids: set[str]) -> None:
         for item_id in item_ids:

@@ -24,6 +24,10 @@ from dataclasses import dataclass, field
 OPEN_ABOVE = 0.2  # hysteresis: open when fraction rises above,
 CLOSE_BELOW = 0.1  # closed when it falls below
 HINGE_SAMPLES = 64
+# confidently-closed gate: this many consecutive sightings under this
+# fraction make the tag a momentary fixed point at `home` (soft anchor)
+CLOSED_REF_BELOW = 0.08
+CLOSED_REF_STREAK = 5
 
 
 @dataclass
@@ -71,6 +75,7 @@ class MovableState:
     last_seen: float = 0.0
     opened_ts: float = 0.0
     closed_ts: float = 0.0
+    closed_streak: int = 0
 
 
 def _ray_point_dist(origin, direction, p) -> float | None:
@@ -104,6 +109,7 @@ class MovableRegistry:
         st = self.states[m.name]
         st.openness = (1 - self.alpha) * st.openness + self.alpha * fraction
         st.last_seen = ts
+        st.closed_streak = st.closed_streak + 1 if fraction < CLOSED_REF_BELOW else 0
         if not st.is_open and st.openness > OPEN_ABOVE:
             st.is_open = True
             st.opened_ts = ts
@@ -146,6 +152,17 @@ class MovableRegistry:
             if d is not None and d < best_d:
                 best_f, best_d = f, d
         return best_f
+
+    def closed_reference(self, tag: str) -> tuple[float, float, float] | None:
+        """The tag's surveyed home position, but only while it is confidently
+        closed — a moving surface at a mechanical limit is momentarily a
+        fixed point usable as a soft calibration reference. Any sighting away
+        from home breaks the streak, so a drifted camera that makes 'closed'
+        look open simply gets no reference (fail-safe, never fail-wrong)."""
+        m = self.by_tag.get(tag)
+        if m is None:
+            return None
+        return m.home if self.states[m.name].closed_streak >= CLOSED_REF_STREAK else None
 
     def drain_events(self) -> list[dict]:
         out, self.events = self.events, []

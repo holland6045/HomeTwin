@@ -29,6 +29,10 @@ def _wrap(a: float) -> float:
     return (a + math.pi) % (2.0 * math.pi) - math.pi
 
 
+SOFT_BASE_SIGMA_RAD = math.radians(0.5)
+SOFT_MAX_SIGMA_RAD = math.radians(2.0)
+
+
 def _az_el(d: tuple[float, float, float]) -> tuple[float, float]:
     return math.atan2(d[1], d[0]), math.atan2(d[2], math.hypot(d[0], d[1]))
 
@@ -64,6 +68,8 @@ class AnchorCalibrator:
         self._yaw0 = geometry.yaw
         self._pitch0 = geometry.pitch
         self.residual_deg: float | None = None  # EMA of angular residual magnitude
+        self.soft_residual_deg: float | None = None  # vs fused soft references
+        self.soft_observations = 0
         self.last_seen: dict[str, float] = {}
 
     def observe(self, tag_id: str, u: float, v: float, ts: float) -> bool:
@@ -108,6 +114,51 @@ class AnchorCalibrator:
             geo.pitch = self._clamp(geo.pitch + self.alpha * rel, self._pitch0)
         return True
 
+    def observe_soft(
+        self,
+        tag_id: str,
+        u: float,
+        v: float,
+        ts: float,
+        position: tuple[float, float, float],
+        sigma_m: float,
+    ) -> None:
+        """Calibrate against a non-surveyed reference: a tag whose *fused*
+        position is tight, stationary, and confirmed by other sensors, or a
+        movable confidently at its home pose.
+
+        Corrections are down-weighted by the reference's own angular
+        uncertainty, so soft references refine the pose but can never fight
+        a surveyed anchor. They keep a separate residual statistic and never
+        affect the healthy flag — a drifting reference must not flag a good
+        camera.
+        """
+        geo = self.geometry
+        dx, dy, dz = (position[i] - geo.position[i] for i in range(3))
+        dist = math.sqrt(dx * dx + dy * dy + dz * dz)
+        if dist < 1e-6:
+            return
+        ang_sigma = math.atan(max(sigma_m, 1e-3) / dist)
+        if ang_sigma > SOFT_MAX_SIGMA_RAD:
+            return  # reference too loose to teach anything
+        az_exp, el_exp = _az_el((dx / dist, dy / dist, dz / dist))
+        az_obs, el_obs = _az_el(geo.ray(u, v))
+        raz = _wrap(az_obs - az_exp)
+        rel = el_obs - el_exp
+
+        magnitude = math.degrees(math.hypot(raz, rel))
+        self.soft_residual_deg = (
+            magnitude
+            if self.soft_residual_deg is None
+            else (1 - self.alpha) * self.soft_residual_deg + self.alpha * magnitude
+        )
+        self.soft_observations += 1
+
+        if self.auto_correct:
+            gain = SOFT_BASE_SIGMA_RAD**2 / (SOFT_BASE_SIGMA_RAD**2 + ang_sigma**2)
+            geo.yaw = self._clamp(geo.yaw - self.alpha * gain * raz, self._yaw0)
+            geo.pitch = self._clamp(geo.pitch + self.alpha * gain * rel, self._pitch0)
+
     def _clamp(self, value: float, reference: float) -> float:
         return max(reference - self.max_correction, min(reference + self.max_correction, value))
 
@@ -119,6 +170,10 @@ class AnchorCalibrator:
             "correction_yaw_deg": round(math.degrees(self.geometry.yaw - self._yaw0), 3),
             "correction_pitch_deg": round(math.degrees(self.geometry.pitch - self._pitch0), 3),
             "auto_correct": self.auto_correct,
+            "soft_residual_deg": (
+                round(self.soft_residual_deg, 3) if self.soft_residual_deg is not None else None
+            ),
+            "soft_observations": self.soft_observations,
             "healthy": (
                 self.residual_deg is None or self.residual_deg < self.healthy_residual_deg
             ),
