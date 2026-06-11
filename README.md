@@ -143,7 +143,9 @@ identical items (storage boxes) distinguished only by sequential tags;
 anonymous sightings of the shared label refine the gated nearest existing
 track and can never seed or hijack one. `apartment-tracker make-tag`
 prints designed fiducial labels (dark plate, neon accent, hazard stripes,
-mono ID type — functional ArUco core in vector SVG).
+mono ID type — functional ArUco core in vector SVG); `--layout wide`
+makes a 25:7 strip for shelf edges with the marker kept at full plate
+height, and `--twin` repeats it at both ends for occlusion resistance.
 `apartment-tracker snapshot-map` renders the live map overlay to SVG for
 headless previews.
 

@@ -41,10 +41,14 @@ def marker_bits(dictionary: str, marker_id: int) -> list[list[int]]:
     return [[1 if img[y][x] < 128 else 0 for x in range(side)] for y in range(side)]
 
 
-def _hazard_stripes(x: float, y: float, w: float, h: float, color: str, n: int = 6) -> str:
+def _hazard_stripes(
+    x: float, y: float, w: float, h: float, color: str, n: int = 6, clip_id: str = "hz"
+) -> str:
     step = w / n
-    parts = [f'<clipPath id="hz"><rect x="{x}" y="{y}" width="{w}" height="{h}"/></clipPath>']
-    parts.append(f'<g clip-path="url(#hz)">')
+    parts = [
+        f'<clipPath id="{clip_id}"><rect x="{x}" y="{y}" width="{w}" height="{h}"/></clipPath>'
+    ]
+    parts.append(f'<g clip-path="url(#{clip_id})">')
     for i in range(-1, n + 1):
         x0 = x + i * step
         parts.append(
@@ -55,37 +59,94 @@ def _hazard_stripes(x: float, y: float, w: float, h: float, color: str, n: int =
     return "".join(parts)
 
 
+def _marker_field(bits: list[list[int]], x: float, y: float, side: float) -> str:
+    """White quiet-zone field with the bit grid inside; cell-exact rects."""
+    n = len(bits)
+    quiet = side / (n + 2)
+    cell = (side - 2 * quiet) / n
+    parts = [f'<rect x="{x:.0f}" y="{y:.0f}" width="{side:.0f}" height="{side:.0f}" fill="{PAPER}"/>']
+    parts += [
+        f'<rect x="{x + quiet + ix * cell:.2f}" y="{y + quiet + iy * cell:.2f}" '
+        f'width="{cell:.2f}" height="{cell:.2f}" fill="{INK}"/>'
+        for iy, row in enumerate(bits)
+        for ix, bit in enumerate(row)
+        if bit
+    ]
+    return "".join(parts)
+
+
 def tag_svg(
     bits: list[list[int]],
     ident: str,
     caption: str = "",
     palette: str = "signal",
     size_mm: float = 60.0,
+    layout: str = "portrait",
+    twin: bool = False,
 ) -> str:
     """Render a styled label around an ArUco bit matrix.
 
-    Layout (portrait plate, 3:4): marker on a paper field upper-left,
-    hazard strip top-right, vertical caption rail on the left, oversized
-    ID type at the bottom, registration notches in all corners.
+    layout="portrait" (3:4 plate): marker upper-left, hazard strip
+    top-right, vertical caption rail, oversized ID type at the bottom.
+
+    layout="wide" (25:7 strip for shelf edges and drawer fronts): the
+    marker spans nearly the full plate height — camera read range is set
+    by marker size, so the strip shrinks around it instead of shrinking
+    it. `twin=True` repeats the marker at the far end so a partially
+    occluded edge still reads.
+
+    size_mm is the printed width; height follows the aspect.
     """
     if palette not in PALETTES:
         raise ValueError(f"unknown palette {palette!r}; choose from {sorted(PALETTES)}")
+    if layout not in ("portrait", "wide"):
+        raise ValueError(f"unknown layout {layout!r}; choose portrait or wide")
     accent = PALETTES[palette]
+    caption_text = (caption or ident).upper()
+    mono = "font-family='ui-monospace, Menlo, monospace'"
+
+    if layout == "wide":
+        W, H = 1000.0, 280.0
+        side = 220.0  # marker height ~= plate height: visibility first
+        notch = (
+            '<g fill="{c}">'
+            '<rect x="14" y="14" width="22" height="6"/><rect x="14" y="14" width="6" height="22"/>'
+            '<rect x="964" y="14" width="22" height="6"/><rect x="980" y="14" width="6" height="22"/>'
+            '<rect x="14" y="260" width="22" height="6"/><rect x="14" y="244" width="6" height="22"/>'
+            '<rect x="964" y="260" width="22" height="6"/><rect x="980" y="244" width="6" height="22"/>'
+            "</g>"
+        ).format(c=accent)
+        second = _marker_field(bits, W - 30 - side, 30, side) if twin else ""
+        text_right = W - 30 - side - 30 if twin else W - 40
+        sub = f"{caption_text} // APT.TRACKER"
+        if 280 + len(sub) * (22 * 0.62 + 5) > text_right:  # would crowd the marker
+            sub = caption_text
+        stripes = (
+            ""
+            if twin
+            else _hazard_stripes(W - 200, 30, 160, 24, accent, clip_id="hzw")
+        )
+        return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W:.0f} {H:.0f}"
+     width="{size_mm}mm" height="{size_mm * H / W:.1f}mm">
+  <rect width="{W:.0f}" height="{H:.0f}" fill="{INK}"/>
+  <rect x="5" y="5" width="{W - 10:.0f}" height="{H - 10:.0f}" fill="none"
+        stroke="{accent}" stroke-width="3"/>
+  {notch}
+  {stripes}
+  {_marker_field(bits, 30, 30, side)}
+  {second}
+  <clipPath id="txt"><rect x="280" y="0" width="{text_right - 290:.0f}" height="{H:.0f}"/></clipPath>
+  <rect x="280" y="200" width="{text_right - 280:.0f}" height="4" fill="{accent}"/>
+  <g clip-path="url(#txt)">
+    <text x="280" y="160" {mono} font-size="92" font-weight="700"
+          fill="{accent}" letter-spacing="2">{ident.upper()}</text>
+    <text x="280" y="242" {mono} font-size="22" fill="#7d8696"
+          letter-spacing="5">{sub}</text>
+  </g>
+</svg>
+"""
+
     W, H = 600.0, 800.0
-    n = len(bits)
-
-    # marker field: white quiet zone with the bit grid inside
-    field_x, field_y, field_w = 120.0, 120.0, 400.0
-    quiet = field_w / (n + 2)  # one-cell quiet zone all around
-    cell = (field_w - 2 * quiet) / n
-    cells = [
-        f'<rect x="{field_x + quiet + ix * cell:.2f}" y="{field_y + quiet + iy * cell:.2f}" '
-        f'width="{cell:.2f}" height="{cell:.2f}" fill="{INK}"/>'
-        for iy, row in enumerate(bits)
-        for ix, bit in enumerate(row)
-        if bit
-    ]
-
     notch = (
         '<g fill="{c}">'
         '<rect x="20" y="20" width="26" height="8"/><rect x="20" y="20" width="8" height="26"/>'
@@ -94,9 +155,6 @@ def tag_svg(
         '<rect x="554" y="772" width="26" height="8"/><rect x="572" y="754" width="8" height="26"/>'
         "</g>"
     ).format(c=accent)
-
-    caption_text = (caption or ident).upper()
-    mono = "font-family='ui-monospace, Menlo, monospace'"
 
     return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W:.0f} {H:.0f}"
      width="{size_mm}mm" height="{size_mm * H / W:.1f}mm">
@@ -108,9 +166,7 @@ def tag_svg(
   <rect x="40" y="120" width="36" height="400" fill="{accent}"/>
   <text x="0" y="0" {mono} font-size="24" fill="{INK}" letter-spacing="3"
         transform="translate(66 508) rotate(-90)">{caption_text}</text>
-  <rect x="{field_x:.0f}" y="{field_y:.0f}" width="{field_w:.0f}" height="{field_w:.0f}"
-        fill="{PAPER}"/>
-  {"".join(cells)}
+  {_marker_field(bits, 120, 120, 400)}
   <rect x="40" y="580" width="520" height="4" fill="{accent}"/>
   <text x="40" y="700" {mono} font-size="96" font-weight="700"
         fill="{accent}" letter-spacing="2">{ident.upper()}</text>

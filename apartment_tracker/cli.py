@@ -241,7 +241,7 @@ def cmd_make_tag(args) -> int:
         return 1
     ident = args.ident or f"TAG/{args.id:02d}"
     svg = tag_svg(bits, ident, caption=args.caption, palette=args.palette,
-                  size_mm=args.size_mm)
+                  size_mm=args.size_mm, layout=args.layout, twin=args.twin)
     out = args.output or f"tag-{args.id}.svg"
     with open(out, "w", encoding="utf-8") as f:
         f.write(svg)
@@ -343,6 +343,10 @@ def main(argv: list[str] | None = None) -> int:
     tagp.add_argument("--palette", default="signal", choices=["signal", "cyan", "magenta", "acid"])
     tagp.add_argument("--dictionary", default="DICT_4X4_50")
     tagp.add_argument("--size-mm", type=float, default=60.0, help="printed width")
+    tagp.add_argument("--layout", default="portrait", choices=["portrait", "wide"],
+                      help="wide: 25:7 strip for shelf edges; marker keeps full height")
+    tagp.add_argument("--twin", action="store_true",
+                      help="wide only: repeat the marker at both ends (occlusion-proof)")
     tagp.add_argument("-o", "--output")
     tagp.set_defaults(fn=cmd_make_tag)
 

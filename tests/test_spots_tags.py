@@ -199,3 +199,30 @@ def test_tag_svg_print_size():
     svg = tag_svg(checker_bits(), "X", size_mm=80.0)
     assert 'width="80.0mm"' in svg
     assert 'height="106.7mm"' in svg  # 3:4 plate
+
+
+def test_wide_tag_layout():
+    svg = tag_svg(checker_bits(), "SHF/B3", caption="shelf b3", palette="acid",
+                  layout="wide", size_mm=200.0)
+    assert 'width="200.0mm"' in svg
+    assert 'height="56.0mm"' in svg  # 25:7 strip
+    assert "SHF/B3" in svg and "SHELF B3 // APT.TRACKER" in svg
+    # marker keeps near-full plate height: 220 px field on a 280 px plate,
+    # cell = (220 - 2*27.5) / 6 = 27.50
+    assert svg.count('width="27.50"') == sum(sum(r) for r in checker_bits())
+
+
+def test_wide_tag_twin_markers():
+    bits = checker_bits()
+    single = tag_svg(bits, "X", layout="wide")
+    twin = tag_svg(bits, "X", layout="wide", twin=True)
+    black = sum(sum(r) for r in bits)
+    assert single.count('width="27.50"') == black
+    assert twin.count('width="27.50"') == 2 * black  # marker at both ends
+    # twin replaces the hazard strip at the right end
+    assert "hzw" in single and "hzw" not in twin
+
+
+def test_tag_svg_rejects_unknown_layout():
+    with pytest.raises(ValueError, match="layout"):
+        tag_svg(checker_bits(), "X", layout="circular")
