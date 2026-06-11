@@ -3,7 +3,7 @@
 #   cron:    0 4 * * 1  /path/to/rebuild_splat.sh
 #   systemd: OnCalendar=Mon *-*-* 04:00
 #
-# Requires: apartment-tracker (pip), nerfstudio (or swap in OpenSplat /
+# Requires: hometwin (pip), nerfstudio (or swap in OpenSplat /
 # Polycam export), and network access to the tracker API.
 set -euo pipefail
 
@@ -18,7 +18,7 @@ mkdir -p "$WORK/images"
 # 1. fresh snapshots from every fixed camera (also re-calibrates them below);
 #    drop in additional walkthrough photos/video frames for better coverage:
 #    ffmpeg -i walkthrough.mp4 -vf fps=2 "$WORK/images/walk_%04d.jpg"
-apartment-tracker capture-snapshots -c "$CONFIG" -o "$WORK/images"
+hometwin capture-snapshots -c "$CONFIG" -o "$WORK/images"
 
 # 2. SfM + splat training (any pipeline that emits .ply + a COLMAP model)
 ns-process-data images --data "$WORK/images" --output-dir "$WORK/processed"
@@ -29,12 +29,12 @@ ns-export gaussian-splat --load-config "$CONFIG_YML" --output-dir "$WORK"
 
 # 3. re-derive camera poses from the same reconstruction (drift check: diff
 #    against current config before applying)
-apartment-tracker calibrate-cameras \
+hometwin calibrate-cameras \
     --colmap "$WORK/processed/colmap/sparse/0" \
     --pairs "$REFPOINTS" > "$WORK/cameras.yaml"
 
 # 4. hot-swap the running tracker's scan — no restart, dashboards reload
-apartment-tracker update-splat "$WORK/splat.ply" \
+hometwin update-splat "$WORK/splat.ply" \
     --host "$TRACKER_HOST" --port "$TRACKER_PORT"
 
 echo "rebuilt $(date): $WORK"

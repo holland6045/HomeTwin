@@ -3,8 +3,8 @@
 import json
 import urllib.request
 
-from apartment_tracker.api import ApiServer
-from apartment_tracker.simulate import build_simulation, run_simulation
+from hometwin.api import ApiServer
+from hometwin.simulate import build_simulation, run_simulation
 
 
 def test_simulation_locates_all_items():

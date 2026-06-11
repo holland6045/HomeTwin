@@ -4,10 +4,10 @@ import math
 
 import pytest
 
-from apartment_tracker.anchors import AnchorCalibrator
-from apartment_tracker.observations import Detection, PositionObservation
-from apartment_tracker.sensors.camera import CameraGeometry, CameraSensor, StaticFrameSource
-from apartment_tracker.simulate import ANCHOR_TAG, CAM_KITCHEN_YAW_TRUE, build_simulation
+from hometwin.anchors import AnchorCalibrator
+from hometwin.observations import Detection, PositionObservation
+from hometwin.sensors.camera import CameraGeometry, CameraSensor, StaticFrameSource
+from hometwin.simulate import ANCHOR_TAG, CAM_KITCHEN_YAW_TRUE, build_simulation
 
 ANCHOR = {"aruco:100": (4.0, 2.0, 0.9)}
 
@@ -128,7 +128,7 @@ def test_multi_position_anchor_corrects_drift_with_both_ends():
 
 
 def test_config_twin_tag_positions(tmp_path):
-    from apartment_tracker.config import load_config
+    from hometwin.config import load_config
 
     cfg_file = tmp_path / "c.yaml"
     cfg_file.write_text(
@@ -203,7 +203,7 @@ def test_simulation_bumped_camera_self_heals():
 
 
 def test_anchor_in_map_overlay():
-    from apartment_tracker.overlay import map_overlay
+    from hometwin.overlay import map_overlay
 
     tracker, state = build_simulation(seed=4)
     for _ in range(10):
@@ -216,8 +216,8 @@ def test_anchor_in_map_overlay():
 
 
 def test_config_attaches_anchors(tmp_path):
-    from apartment_tracker import registry
-    from apartment_tracker.config import load_config
+    from hometwin import registry
+    from hometwin.config import load_config
 
     registry.load_plugins()
 

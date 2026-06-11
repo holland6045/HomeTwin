@@ -3,9 +3,9 @@
 import urllib.request
 import json
 
-from apartment_tracker.api import ApiServer
-from apartment_tracker.overlay import camera_overlay, map_overlay
-from apartment_tracker.simulate import build_simulation
+from hometwin.api import ApiServer
+from hometwin.overlay import camera_overlay, map_overlay
+from hometwin.simulate import build_simulation
 
 
 def run_sim(ticks=60, seed=3):

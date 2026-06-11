@@ -2,7 +2,7 @@ import math
 
 import pytest
 
-from apartment_tracker import linalg as la
+from hometwin import linalg as la
 
 
 def test_mat_mul_identity():

@@ -3,7 +3,7 @@ import random
 
 import pytest
 
-from apartment_tracker.fusion.kalman import KalmanFilter3D
+from hometwin.fusion.kalman import KalmanFilter3D
 
 
 def test_position_updates_converge():

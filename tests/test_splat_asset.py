@@ -2,9 +2,9 @@ import json
 import urllib.error
 import urllib.request
 
-from apartment_tracker.api import ApiServer
-from apartment_tracker.config import load_config
-from apartment_tracker.simulate import build_simulation
+from hometwin.api import ApiServer
+from hometwin.config import load_config
+from hometwin.simulate import build_simulation
 
 
 def serve(tracker):
@@ -108,7 +108,7 @@ def test_transform_update_endpoint():
 
 
 def test_update_splat_cli_pushes_to_running_tracker(tmp_path):
-    from apartment_tracker.cli import main
+    from hometwin.cli import main
 
     asset = tmp_path / "live.ply"
     asset.write_bytes(b"old")
@@ -132,7 +132,7 @@ def test_update_splat_cli_pushes_to_running_tracker(tmp_path):
 
 
 def test_splat_rebuild_trainer_runs_command(tmp_path):
-    from apartment_tracker import registry
+    from hometwin import registry
 
     registry.load_plugins()
     out = tmp_path / "splat.ply"

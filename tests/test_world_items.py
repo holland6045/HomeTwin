@@ -1,7 +1,7 @@
 import pytest
 
-from apartment_tracker.items import Item, ItemRegistry
-from apartment_tracker.world import World, Zone
+from hometwin.items import Item, ItemRegistry
+from hometwin.world import World, Zone
 
 
 def make_world():

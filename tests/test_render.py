@@ -1,6 +1,6 @@
-from apartment_tracker.overlay import map_overlay
-from apartment_tracker.render import map_svg
-from apartment_tracker.simulate import build_simulation
+from hometwin.overlay import map_overlay
+from hometwin.render import map_svg
+from hometwin.simulate import build_simulation
 
 
 def test_map_svg_contains_all_layers():

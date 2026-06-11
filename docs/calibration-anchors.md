@@ -19,7 +19,7 @@ in frame: cheap to print, survey once, works forever.
    range):
 
    ```bash
-   apartment-tracker make-anchor --id 100 --pixels 800 -o anchor-100.png
+   hometwin make-anchor --id 100 --pixels 800 -o anchor-100.png
    ```
 
 2. Mount it flat and rigid where a camera (ideally several) can see it.

@@ -5,11 +5,11 @@ import time
 
 import pytest
 
-from apartment_tracker.observations import Detection, PositionObservation, RangeObservation
-from apartment_tracker.sensors.ble import BLEScannerSensor, PathLossModel, RSSISource
-from apartment_tracker.sensors.camera import CameraGeometry, CameraSensor, StaticFrameSource
-from apartment_tracker.sensors.network import NetworkBridgeSensor
-from apartment_tracker.sensors.tomography import RTIGrid, TomographySensor, LinkSource
+from hometwin.observations import Detection, PositionObservation, RangeObservation
+from hometwin.sensors.ble import BLEScannerSensor, PathLossModel, RSSISource
+from hometwin.sensors.camera import CameraGeometry, CameraSensor, StaticFrameSource
+from hometwin.sensors.network import NetworkBridgeSensor
+from hometwin.sensors.tomography import RTIGrid, TomographySensor, LinkSource
 
 
 # --- camera geometry ---------------------------------------------------------

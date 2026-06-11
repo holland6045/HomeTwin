@@ -3,10 +3,10 @@ import urllib.request
 
 import pytest
 
-from apartment_tracker.api import ApiServer
-from apartment_tracker.overlay import camera_overlay, floor_ring, map_overlay
-from apartment_tracker.sensors.camera import CameraGeometry
-from apartment_tracker.simulate import build_simulation
+from hometwin.api import ApiServer
+from hometwin.overlay import camera_overlay, floor_ring, map_overlay
+from hometwin.sensors.camera import CameraGeometry
+from hometwin.simulate import build_simulation
 
 
 def run_sim(ticks=40, seed=3):
@@ -123,7 +123,7 @@ def test_api_serves_overlays_and_ui():
         with urllib.request.urlopen(base + "/", timeout=5) as r:
             html = r.read().decode()
             assert r.headers["Content-Type"].startswith("text/html")
-        assert "Apartment Tracker" in html
+        assert "HomeTwin" in html
         assert "Tomography heat" in html
     finally:
         api.stop()

@@ -4,15 +4,15 @@ import math
 
 import pytest
 
-from apartment_tracker.config import AppConfig, load_config
-from apartment_tracker.items import Item, ItemRegistry
-from apartment_tracker.movables import Movable, MovableRegistry
-from apartment_tracker.observations import BearingObservation, PositionObservation
-from apartment_tracker.sensors.camera import CameraGeometry
-from apartment_tracker.sensors.mock import ScriptedSensor
-from apartment_tracker.simulate import build_simulation
-from apartment_tracker.tracker import Tracker
-from apartment_tracker.world import Spot, World, Zone
+from hometwin.config import AppConfig, load_config
+from hometwin.items import Item, ItemRegistry
+from hometwin.movables import Movable, MovableRegistry
+from hometwin.observations import BearingObservation, PositionObservation
+from hometwin.sensors.camera import CameraGeometry
+from hometwin.sensors.mock import ScriptedSensor
+from hometwin.simulate import build_simulation
+from hometwin.tracker import Tracker
+from hometwin.world import Spot, World, Zone
 
 CAM = CameraGeometry(position=(0.0, 0.0, 2.2), yaw_deg=45, pitch_deg=25, hfov_deg=80)
 
@@ -176,7 +176,7 @@ def test_simulation_drawer_cycle():
             opened |= e.get("event") == "opened"
             closed |= e.get("event") == "closed"
     assert opened and closed
-    from apartment_tracker.overlay import map_overlay
+    from hometwin.overlay import map_overlay
 
     d = map_overlay(tracker)
     assert d["movables"][0]["name"] == "utensil-drawer"

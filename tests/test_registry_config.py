@@ -1,7 +1,7 @@
 import pytest
 
-from apartment_tracker import registry
-from apartment_tracker.config import load_config
+from hometwin import registry
+from hometwin.config import load_config
 
 
 def test_builtin_plugins_register():

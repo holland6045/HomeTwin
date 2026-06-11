@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "apartment-tracker"
+name = "hometwin"
 version = "0.1.0"
-description = "Modular, hardware-agnostic CV + sensor-fusion system for locating tagged items in an apartment"
+description = "HomeTwin: a sensor-fused digital twin of your apartment — locate tagged items, presence, and door/drawer state in real time"
 requires-python = ">=3.10"
 dependencies = ["PyYAML>=6.0"]
 
@@ -15,13 +15,13 @@ ml = ["onnxruntime>=1.16", "numpy>=1.24"]
 dev = ["pytest>=7.0"]
 
 [project.scripts]
-apartment-tracker = "apartment_tracker.cli:main"
+hometwin = "hometwin.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["apartment_tracker*"]
+include = ["hometwin*"]
 
 [tool.setuptools.package-data]
-apartment_tracker = ["static/*.html"]
+hometwin = ["static/*.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

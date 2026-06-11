@@ -5,13 +5,13 @@ import random
 
 import pytest
 
-from apartment_tracker.fusion import FusionEngine
-from apartment_tracker.fusion.engine import ray_at_height, triangulate_rays
-from apartment_tracker.items import Item, ItemRegistry
-from apartment_tracker.observations import BearingObservation
-from apartment_tracker.sensors.camera import CameraGeometry, CameraSensor, StaticFrameSource
-from apartment_tracker.observations import Detection
-from apartment_tracker.world import World, Zone
+from hometwin.fusion import FusionEngine
+from hometwin.fusion.engine import ray_at_height, triangulate_rays
+from hometwin.items import Item, ItemRegistry
+from hometwin.observations import BearingObservation
+from hometwin.sensors.camera import CameraGeometry, CameraSensor, StaticFrameSource
+from hometwin.observations import Detection
+from hometwin.world import World, Zone
 
 
 def ray_to(origin, target, jitter=None, rng=None):

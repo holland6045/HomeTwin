@@ -21,7 +21,7 @@ the contract below is the whole interface.
  "centroid": [2.0, 2.0, 1.0], "sigma_m": 1.5}
 ```
 
-Rules the bridge enforces (`apartment_tracker/sensors/network.py`):
+Rules the bridge enforces (`hometwin/sensors/network.py`):
 
 - Timestamps are assigned host-side on receipt; MCU clocks are never trusted.
 - Malformed lines are counted and dropped — a flaky node cannot take the

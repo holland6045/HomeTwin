@@ -2,10 +2,10 @@ import math
 
 import pytest
 
-from apartment_tracker import registry
-from apartment_tracker.sensors.ble import PathLossModel
-from apartment_tracker.training.dataset import DatasetRecorder
-from apartment_tracker.training.trainers import PathLossTrainer
+from hometwin import registry
+from hometwin.sensors.ble import PathLossModel
+from hometwin.training.dataset import DatasetRecorder
+from hometwin.training.trainers import PathLossTrainer
 
 
 def test_path_loss_trainer_recovers_parameters():

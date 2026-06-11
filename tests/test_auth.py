@@ -8,10 +8,10 @@ import urllib.request
 
 import pytest
 
-from apartment_tracker.api import ApiServer
-from apartment_tracker.config import resolve_tokens
-from apartment_tracker.sensors.network import NetworkBridgeSensor
-from apartment_tracker.simulate import build_simulation
+from hometwin.api import ApiServer
+from hometwin.config import resolve_tokens
+from hometwin.sensors.network import NetworkBridgeSensor
+from hometwin.simulate import build_simulation
 
 ADMIN = "admin-secret-token"
 VIEWER = "viewer-secret-token"

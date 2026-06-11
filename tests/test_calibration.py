@@ -4,7 +4,7 @@ import math
 
 import pytest
 
-from apartment_tracker.calibration import (
+from hometwin.calibration import (
     calibrate_cameras,
     camera_pose,
     fit_alignment,

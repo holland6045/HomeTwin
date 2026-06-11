@@ -1,6 +1,6 @@
 # Gaussian splatting: viability assessment
 
-Question: should the apartment tracker use 3D Gaussian splatting (3DGS),
+Question: should HomeTwin use 3D Gaussian splatting (3DGS),
 and for what?
 
 ## TL;DR
@@ -59,7 +59,7 @@ outputs `.ply`/`.splat` directly).
 - **Automatic camera calibration** from the scan's COLMAP reconstruction:
 
   ```bash
-  apartment-tracker calibrate-cameras \
+  hometwin calibrate-cameras \
       --colmap scans/colmap/sparse/0 \
       --pairs scans/refpoints.yaml \
       --images cam-kitchen.jpg cam-living-a.jpg
@@ -81,7 +81,7 @@ outputs `.ply`/`.splat` directly).
    Include a snapshot from each fixed camera in the image set.
 2. Pick >= 2 reference points with known world coordinates, write
    `refpoints.yaml`.
-3. `apartment-tracker calibrate-cameras ...` → paste camera poses into
+3. `hometwin calibrate-cameras ...` → paste camera poses into
    config; reuse the printed alignment as `world.splat_transform`.
 4. Set `world.splat_asset`, open the 3D tab: live items inside your room.
 
@@ -90,15 +90,15 @@ outputs `.ply`/`.splat` directly).
 The scan goes stale as the room changes; rebuilding it is a cron job on
 whatever machine has the GPU — the tracker host is untouched:
 
-1. `apartment-tracker capture-snapshots -c apartment.yaml -o images/` pulls
+1. `hometwin capture-snapshots -c apartment.yaml -o images/` pulls
    one fresh frame from every configured camera (add walkthrough video
    frames for coverage).
 2. Any splat pipeline (nerfstudio, OpenSplat, a phone-app export) trains
    the new model.
-3. `apartment-tracker calibrate-cameras ...` re-derives camera poses from
+3. `hometwin calibrate-cameras ...` re-derives camera poses from
    the same reconstruction — diff against your config to catch a bumped
    camera before it skews fusion.
-4. `apartment-tracker update-splat new.ply [--transform '{...}']` pushes
+4. `hometwin update-splat new.ply [--transform '{...}']` pushes
    the scan to the running tracker over HTTP. The write is atomic
    (tmp + rename), no restart; open dashboards detect the version bump
    (asset mtime in `/overlay/map`) and reload the 3D scene automatically.

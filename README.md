@@ -1,14 +1,28 @@
-# Apartment Tracker
+# HomeTwin
 
-Modular CV + sensor-fusion system that answers one question: **where are my
-keys / wallet / phone right now?**
+**A digital twin of your apartment** — a live, queryable model of the
+physical space that stays synchronized with reality through whatever
+sensing you have, and answers the question that matters: *where are my
+keys right now?*
 
-It fuses whatever sensing you have — cameras, BLE beacons, RF tomography
-meshes, MCU sensor nodes — into a single per-item position estimate with a
-zone name ("kitchen counter"), an uncertainty radius, and a freshness age.
-The core is pure Python (stdlib + PyYAML), so it runs on a laptop, a
-Raspberry Pi, or any always-on box; hardware support is plugins all the way
-down.
+The twin holds four kinds of truth:
+
+- **Geometry** — zones, drawer/shelf spots, camera poses, and an optional
+  photoreal Gaussian-splat replica of the rooms.
+- **Live state** — fused per-item position estimates (cameras, BLE, RF
+  tomography, MCU nodes) with uncertainty and freshness; occupant
+  presence; door/drawer articulation (open/closed, how far).
+- **History** — motion trails, zone/spot transition events, open/close
+  events, and persistence across restarts ("wallet: sofa, 2 h ago").
+- **Inference** — cross-signal conclusions no single sensor sees, like
+  "keys were last seen at the open drawer, the drawer closed, the keys
+  are probably inside".
+
+It fuses every modality into a single estimate per item with a precise
+location name ("counter-tray", not just "kitchen"), an uncertainty radius,
+and an age. The core is pure Python (stdlib + PyYAML), so it runs on a
+laptop, a Raspberry Pi, or any always-on box; hardware support is plugins
+all the way down.
 
 ```
 ┌─────────────┐  ┌─────────────┐  ┌──────────────┐  ┌─────────────────┐
@@ -42,17 +56,17 @@ pip install -e .[vision]    # optional: OpenCV cameras + ArUco
 pip install -e .[ml]        # optional: ONNX object detection
 
 # zero-hardware demo: synthetic apartment with all three modalities
-apartment-tracker simulate
+hometwin simulate
 
 # same demo as a live dashboard with togglable sensor overlays
-apartment-tracker simulate --serve   # then open http://127.0.0.1:8080/
+hometwin simulate --serve   # then open http://127.0.0.1:8080/
 
 # real deployment
-apartment-tracker run -c configs/apartment.example.yaml
-apartment-tracker where keys
+hometwin run -c configs/apartment.example.yaml
+hometwin where keys
 # -> House keys: kitchen_counter at (6.5, 1.0, 0.9) ±0.06 m, seen 2.0s ago via cam-kitchen
 
-apartment-tracker plugins   # list everything installed
+hometwin plugins   # list everything installed
 ```
 
 Run the tests with `pytest` (44 tests, no hardware or heavy deps needed).
@@ -62,7 +76,7 @@ Run the tests with `pytest` (44 tests, no hardware or heavy deps needed).
 ### Hardware agnosticism: three canonical observations
 
 Every sensing modality reduces to one of three shapes before fusion
-(`apartment_tracker/observations.py`):
+(`hometwin/observations.py`):
 
 | Shape | Carries | Produced by |
 |---|---|---|
@@ -141,30 +155,30 @@ of "office"; a tagged spot's surveyed position doubles as a camera
 calibration anchor. `item_sets` bulk-register families of visually
 identical items (storage boxes) distinguished only by sequential tags;
 anonymous sightings of the shared label refine the gated nearest existing
-track and can never seed or hijack one. `apartment-tracker make-tag`
+track and can never seed or hijack one. `hometwin make-tag`
 prints designed fiducial labels (dark plate, neon accent, hazard stripes,
 mono ID type — functional ArUco core in vector SVG); `--layout wide`
 makes a 25:7 strip for shelf edges with the marker kept at full plate
 height, and `--twin` repeats it at both ends for occlusion resistance.
-`apartment-tracker snapshot-map` renders the live map overlay to SVG for
+`hometwin snapshot-map` renders the live map overlay to SVG for
 headless previews.
 
 **Calibration anchors (optional):** printed ArUco blocks at surveyed
-positions (`apartment-tracker make-anchor`, `world.anchors` in config)
+positions (`hometwin make-anchor`, `world.anchors` in config)
 give every camera that sees one a shared fixed reference: drift is
 detected and reported (drifted cameras render red), and with
 `anchor_correct: true` rotation drift self-heals online, bounded to ±10°
 from the configured pose. Cameras without an anchor in view are
 unaffected. Details: `docs/calibration-anchors.md`.
 
-**Camera auto-calibration:** `apartment-tracker calibrate-cameras` derives
+**Camera auto-calibration:** `hometwin calibrate-cameras` derives
 each fixed camera's `position/yaw_deg/pitch_deg/hfov_deg` from the COLMAP
 reconstruction produced by the splat scan — include one snapshot per camera
 in the scan's image set and supply two reference points; no tape measure.
 
 **Scheduled scan refresh:** `scripts/rebuild_splat.sh` runs the full loop
 on a GPU host (capture snapshots → train → recalibrate → push): the new
-scan is hot-swapped into the running tracker via `apartment-tracker
+scan is hot-swapped into the running tracker via `hometwin
 update-splat` and open dashboards reload it automatically. Cron it weekly.
 Details and workflow: `docs/gaussian-splatting.md`.
 
@@ -176,11 +190,11 @@ reboot the answer is still "wallet: sofa, 2 h ago [stale]" instead of
 "never seen". Zone transitions are recorded as events (`GET /events`):
 "keys moved kitchen_counter → hall at 18:42".
 
-### Plugins (`apartment_tracker/registry.py`)
+### Plugins (`hometwin/registry.py`)
 
 Four kinds: `sensor`, `detector`, `frame_source`, `trainer`. Config selects
 by name; third-party packages self-register via the
-`apartment_tracker.plugins` entry-point group. Optional heavy deps (cv2,
+`hometwin.plugins` entry-point group. Optional heavy deps (cv2,
 onnxruntime) are imported only inside the plugin that needs them — the core
 import graph stays clean, and a missing backend errors only if config
 actually selects it.
@@ -223,9 +237,9 @@ The system is calibrated/retrained from recorded data, per modality:
 
 1. `DatasetRecorder` captures labeled samples (RSSI at known distances,
    detection crops marked correct/incorrect) as JSONL.
-2. `apartment-tracker train path_loss` fits the BLE model to *your* walls
+2. `hometwin train path_loss` fits the BLE model to *your* walls
    and furniture (closed-form, instant).
-3. `apartment-tracker train detector_finetune` shells out to any training
+3. `hometwin train detector_finetune` shells out to any training
    stack (ultralytics, a cloud job) and drops an ONNX file that the existing
    `onnx` detector loads via config. The heavy ML stack is never a
    dependency of the tracker itself.
@@ -252,7 +266,7 @@ comparison per request or connection — fusion and polling are untouched
 ## Repository layout
 
 ```
-apartment_tracker/
+hometwin/
   observations.py      # the 3 canonical observation shapes + Detection
   registry.py          # plugin registry (the extension seam)
   world.py             # zones over the world frame; point -> zone name
@@ -291,4 +305,4 @@ tests/                 # 50 tests, hardware-free
   type and one `isinstance` branch in the fusion engine; existing sensors
   and configs are untouched.
 - **Out-of-tree plugins**: publish a package exposing the
-  `apartment_tracker.plugins` entry point; no fork needed.
+  `hometwin.plugins` entry point; no fork needed.

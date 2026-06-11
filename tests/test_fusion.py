@@ -1,13 +1,13 @@
 import math
 
-from apartment_tracker.fusion import FusionEngine
-from apartment_tracker.items import Item, ItemRegistry
-from apartment_tracker.observations import (
+from hometwin.fusion import FusionEngine
+from hometwin.items import Item, ItemRegistry
+from hometwin.observations import (
     AreaObservation,
     PositionObservation,
     RangeObservation,
 )
-from apartment_tracker.world import World, Zone
+from hometwin.world import World, Zone
 
 
 def make_engine():

@@ -1,13 +1,13 @@
 import math
 
-from apartment_tracker.config import AppConfig
-from apartment_tracker.fusion import FusionEngine
-from apartment_tracker.items import Item, ItemRegistry
-from apartment_tracker.observations import PositionObservation
-from apartment_tracker.sensors.mock import ScriptedSensor
-from apartment_tracker.store import StateStore
-from apartment_tracker.tracker import Tracker
-from apartment_tracker.world import World, Zone
+from hometwin.config import AppConfig
+from hometwin.fusion import FusionEngine
+from hometwin.items import Item, ItemRegistry
+from hometwin.observations import PositionObservation
+from hometwin.sensors.mock import ScriptedSensor
+from hometwin.store import StateStore
+from hometwin.tracker import Tracker
+from hometwin.world import World, Zone
 
 
 def make_parts():

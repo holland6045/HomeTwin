@@ -2,13 +2,13 @@
 
 import pytest
 
-from apartment_tracker.config import load_config
-from apartment_tracker.fusion import FusionEngine
-from apartment_tracker.items import Item, ItemRegistry
-from apartment_tracker.observations import PositionObservation
-from apartment_tracker.simulate import build_simulation
-from apartment_tracker.tags import PALETTES, tag_svg
-from apartment_tracker.world import Spot, World, Zone
+from hometwin.config import load_config
+from hometwin.fusion import FusionEngine
+from hometwin.items import Item, ItemRegistry
+from hometwin.observations import PositionObservation
+from hometwin.simulate import build_simulation
+from hometwin.tags import PALETTES, tag_svg
+from hometwin.world import Spot, World, Zone
 
 
 # --- spots ---------------------------------------------------------------------
@@ -95,9 +95,9 @@ def test_ambiguous_label_associates_to_nearest_track_only():
 
 
 def test_spot_transition_event():
-    from apartment_tracker.config import AppConfig
-    from apartment_tracker.sensors.mock import ScriptedSensor
-    from apartment_tracker.tracker import Tracker
+    from hometwin.config import AppConfig
+    from hometwin.sensors.mock import ScriptedSensor
+    from hometwin.tracker import Tracker
 
     items = ItemRegistry()
     items.add(Item("keys", "Keys", tag_ids=["aruco:7"]))
@@ -157,7 +157,7 @@ def test_simulation_keys_resolve_to_spot():
         tracker.step()
     snap = {e["item_id"]: e for e in tracker.engine.snapshot(now=state.now)}
     assert snap["keys"]["spot"] == "counter-tray"
-    from apartment_tracker.overlay import map_overlay
+    from hometwin.overlay import map_overlay
 
     d = map_overlay(tracker)
     assert d["spots"][0]["name"] == "counter-tray"
@@ -206,7 +206,7 @@ def test_wide_tag_layout():
                   layout="wide", size_mm=200.0)
     assert 'width="200.0mm"' in svg
     assert 'height="56.0mm"' in svg  # 25:7 strip
-    assert "SHF/B3" in svg and "SHELF B3 // APT.TRACKER" in svg
+    assert "SHF/B3" in svg and "SHELF B3 // HOMETWIN" in svg
     # marker keeps near-full plate height: 220 px field on a 280 px plate,
     # cell = (220 - 2*27.5) / 6 = 27.50
     assert svg.count('width="27.50"') == sum(sum(r) for r in checker_bits())

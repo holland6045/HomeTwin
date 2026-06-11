@@ -1,24 +1,24 @@
-# Apartment tracker configuration.
+# HomeTwin configuration.
 # World frame: meters, z up, origin at a chosen apartment corner.
 
 world:
   # optional Gaussian-splat scan (.ply/.splat): the dashboard's 3D tab
   # renders live item markers, trails, and sensor overlays inside it.
   # Calibrate camera poses from the same scan with:
-  #   apartment-tracker calibrate-cameras --colmap <dir> --pairs refpoints.yaml
+  #   hometwin calibrate-cameras --colmap <dir> --pairs refpoints.yaml
   # See docs/gaussian-splatting.md.
   # splat_asset: scans/apartment.ply
   # splat_transform: {position: [0, 0, 0], rotation_deg: [0, 0, 0], scale: 1.0}
   # Blocky calibration targets (printed ArUco, surveyed once): a shared
   # fixed reference for every camera that sees one. Optional — cameras run
-  # on configured poses alone. Generate: apartment-tracker make-anchor --id 100
+  # on configured poses alone. Generate: hometwin make-anchor --id 100
   # anchors:
   #   - {tag: "aruco:100", position: [6.9, 1.5, 0.9]}   # kitchen counter
   #   - {tag: "aruco:101", position: [0.3, 2.0, 1.4]}   # hallway wall
   # Spots: drawer/shelf-level micro-locations. Resolution prefers a spot
   # over its zone ("desk-drawer-2", not just "office"). A tagged spot's
   # surveyed position also calibrates cameras (anchor for free). Print the
-  # label with: apartment-tracker make-tag --id 13 --ident DRW/02 --caption "desk drawer 2"
+  # label with: hometwin make-tag --id 13 --ident DRW/02 --caption "desk drawer 2"
   # spots:
   #   - {name: desk-drawer-2, tag: "aruco:13", position: [1.0, 1.0, 0.6], radius: 0.2}
   #   - {name: shelf-b3,      tag: "aruco:14", position: [3.5, 0.2, 1.6], radius: 0.3}
@@ -88,7 +88,7 @@ sensors:
     # anchor_correct: true
 
   # Same camera hardware, different brains: an ONNX model fine-tuned on your
-  # items via `apartment-tracker train detector_finetune`.
+  # items via `hometwin train detector_finetune`.
   # - type: camera
   #   id: cam-living
   #   position: [0.2, 0.2, 2.4]
@@ -121,7 +121,7 @@ sensors:
 
   # JSON-lines TCP ingest for MCU nodes (ESP32 BLE scanners, RTI link meshes,
   # anything). Raw "rssi" messages are converted with this path-loss model;
-  # retrain it with: apartment-tracker train path_loss
+  # retrain it with: hometwin train path_loss
   - type: network_bridge
     id: bridge
     port: 8787
@@ -147,4 +147,4 @@ api:
   # auth:
   #   tokens:
   #     - {env: TRACKER_ADMIN_TOKEN, role: admin}
-  #     - {file: /etc/apartment-tracker/viewer.token, role: viewer}
+  #     - {file: /etc/hometwin/viewer.token, role: viewer}
