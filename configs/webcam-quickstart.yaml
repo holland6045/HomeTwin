@@ -1,0 +1,44 @@
+# First run on a PC with its webcam — minimal single-camera twin.
+#
+#   pip install -e .[vision]
+#   hometwin make-anchor --id 7 -o tag-keys.png     # print, tape to your keys
+#   hometwin webcam-test                            # smoke test: see detections
+#   hometwin run -c configs/webcam-quickstart.yaml  # then open http://127.0.0.1:8080/
+#   hometwin where keys
+#
+# Measure roughly: put the world origin at a corner of the camera's view,
+# x/y in metres along the floor. Precision can come later (anchors, splat).
+
+world:
+  zones:
+    - {name: desk-area, min: [0, 0, 0], max: [3, 3, 2.6]}
+
+items:
+  - id: keys
+    name: House keys
+    tags: ["aruco:7"]
+  - id: wallet
+    name: Wallet
+    tags: ["aruco:8"]
+
+sensors:
+  - type: camera
+    id: webcam
+    # webcam on top of the monitor, looking down at the desk: ~0.45 m up,
+    # pitched down ~35 deg. Eyeball it; anchor tags can self-correct later.
+    position: [1.5, 0.0, 0.45]
+    yaw_deg: 90          # facing +y (into the desk)
+    pitch_deg: 35
+    hfov_deg: 70
+    surface_z: 0.0       # detections assumed on the desk plane (origin z)
+    base_sigma_m: 0.1
+    source: {type: opencv, device: 0}
+    detector: {type: aruco, dictionary: DICT_4X4_50}
+
+tracker:
+  poll_hz: 10
+  state_path: hometwin_state.json
+
+api:
+  host: 127.0.0.1
+  port: 8080

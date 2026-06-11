@@ -91,15 +91,15 @@ class Tracker:
                 count += 1
                 # remote cameras report movable tags as bearings: route to
                 # the door/drawer state estimator, not the fusion engine
-                if (
-                    self.cfg.movables is not None
-                    and isinstance(obs, BearingObservation)
-                    and obs.item_id
-                    and self.cfg.movables.observe_ray(
+                if isinstance(obs, BearingObservation) and obs.item_id:
+                    if self.cfg.movables is not None and self.cfg.movables.observe_ray(
                         obs.item_id, obs.origin, obs.direction, obs.timestamp
-                    )
-                ):
-                    continue
+                    ):
+                        continue
+                    if self.cfg.device_tags is not None and self.cfg.device_tags.observe_ray(
+                        obs.item_id, obs.origin, obs.direction, obs.timestamp
+                    ):
+                        continue
                 with self._lock:
                     applied = self.engine.ingest(obs)
                 if applied:
@@ -129,7 +129,14 @@ class Tracker:
         if self.cfg.movables is not None:
             self.events.extend(self.cfg.movables.drain_events())
         self._push_soft_references()
+        from hometwin.learning import collect_ble_samples
+
+        collect_ble_samples(self)
         return count
+
+    def learning_status(self) -> list[dict]:
+        learners = getattr(self, "_path_loss_learners", {})
+        return [ln.status() for ln in learners.values()]
 
     def _push_soft_references(self) -> None:
         """Well-localized item tags become shared references for cameras.

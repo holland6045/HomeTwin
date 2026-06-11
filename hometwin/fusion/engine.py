@@ -39,6 +39,15 @@ MIN_RAY_ANGLE_RAD = 0.035  # ~2 deg of viewpoint diversity before triangulating
 Z_PRIOR_AFTER_S = 5.0
 Z_PRIOR_INTERVAL_S = 1.0
 Z_PRIOR_SIGMA_M = 0.9
+# adaptive trust via measurement self-consistency: consecutive fixes from the
+# same sensor on a motion-compensated track scatter like 2x its claimed
+# variance. A sensor claiming 5 cm while scattering 50 cm convicts itself —
+# robust even when that sensor's overconfidence already corrupted the track
+# (innovation-based metrics blame the honest sensor in that case). Trust
+# inflates the claimed sigma, bounded so nothing is silenced or worshipped.
+TRUST_MIN, TRUST_MAX = 0.7, 20.0
+NIS_ALPHA = 0.05
+SELF_CONSISTENCY_MAX_DT = 5.0
 
 
 def triangulate_rays(rays: list[BearingObservation]) -> tuple[float, float, float] | None:
@@ -142,6 +151,38 @@ class FusionEngine:
         self._pending_count: dict[str, int] = {}
         self._pending_rays: dict[str, dict[str, BearingObservation]] = {}
         self._pending_ray_count: dict[str, int] = {}
+        self.adaptive_trust = True
+        self.sensor_nis: dict[str, float] = {}
+        self._last_meas: dict[tuple[str, str], tuple[tuple, float]] = {}
+
+    def trust(self, sensor_id: str) -> float:
+        nis = self.sensor_nis.get(sensor_id)
+        if nis is None or not self.adaptive_trust:
+            return 1.0
+        return min(max(math.sqrt(nis), TRUST_MIN), TRUST_MAX)
+
+    def _note_nis(self, sensor_id: str, nis_per_dof: float) -> None:
+        prev = self.sensor_nis.get(sensor_id)
+        self.sensor_nis[sensor_id] = (
+            nis_per_dof if prev is None else (1 - NIS_ALPHA) * prev + NIS_ALPHA * nis_per_dof
+        )
+
+    def _note_self_consistency(self, obs: PositionObservation, item_id: str, track) -> None:
+        key = (obs.sensor_id, item_id)
+        prev = self._last_meas.get(key)
+        self._last_meas[key] = (tuple(obs.position), obs.timestamp)
+        if prev is None:
+            return
+        prev_pos, prev_ts = prev
+        dt = obs.timestamp - prev_ts
+        if not 0.0 < dt <= SELF_CONSISTENCY_MAX_DT:
+            return
+        v = track.filter.x[3:6]
+        d2 = sum(
+            (obs.position[i] - prev_pos[i] - v[i] * dt) ** 2 for i in range(3)
+        )
+        # E[d2] = 2 * 3 * R for an honest sensor on a well-tracked item
+        self._note_nis(obs.sensor_id, d2 / (6.0 * obs.sigma_m**2))
 
     def _resolve(self, obs: Observation) -> str | None:
         if obs.item_id and self.items.get(obs.item_id):
@@ -194,14 +235,17 @@ class FusionEngine:
 
         if isinstance(obs, PositionObservation):
             track = self.tracks.get(item_id)
+            sigma = obs.sigma_m
             if track is not None:
                 track.filter.predict(max(obs.timestamp - track.last_update, 0.0))
                 if anonymous and track.filter.mahalanobis_sq(
                     obs.position, obs.sigma_m
                 ) > GATE_MAHALANOBIS_SQ:
                     return None  # plausible look-alike elsewhere; don't hijack the track
+                self._note_self_consistency(obs, item_id, track)
+                sigma = obs.sigma_m * self.trust(obs.sensor_id)
             track = self._track_for(item_id, obs.position, obs.timestamp)
-            track.filter.update_position(obs.position, obs.sigma_m)
+            track.filter.update_position(obs.position, sigma)
         elif isinstance(obs, RangeObservation):
             track = self.tracks.get(item_id)
             if track is None:
@@ -238,7 +282,9 @@ class FusionEngine:
                     obs.origin, obs.direction, obs.sigma_rad
                 ) > GATE_MAHALANOBIS_SQ:
                     return None
-                track.filter.update_bearing(obs.origin, obs.direction, obs.sigma_rad)
+                track.filter.update_bearing(
+                    obs.origin, obs.direction, obs.sigma_rad * self.trust(obs.sensor_id)
+                )
             else:
                 pend = self._pending_rays.setdefault(item_id, {})
                 pend[obs.sensor_id] = obs

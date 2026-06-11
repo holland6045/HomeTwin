@@ -31,6 +31,7 @@ class AppConfig:
     save_interval_s: float = 30.0
     anchors: dict = field(default_factory=dict)  # fiducial tag -> world position
     movables: object = None  # MovableRegistry (doors/drawers) or None
+    device_tags: object = None  # DeviceTagSolver (tags on sensors) or None
     splat_asset: str | None = None  # .splat/.ply scan rendered by the dashboard's 3D tab
     splat_transform: dict | None = None  # aligns the scan to the world frame
     raw: dict = field(default_factory=dict)
@@ -59,11 +60,14 @@ def resolve_tokens(auth_cfg: dict | None) -> list[dict]:
     return out
 
 
-def build_sensor(cfg: dict) -> SensorAdapter:
+def build_sensor(cfg: dict) -> tuple[SensorAdapter, dict]:
     cfg = dict(cfg)
     kind = cfg.pop("type")
     sensor_id = cfg.pop("id", kind)
-    return registry.create("sensor", kind, sensor_id=sensor_id, **cfg)
+    device_tag = cfg.pop("device_tag", None)
+    device_tag_correct = bool(cfg.pop("device_tag_correct", False))
+    sensor = registry.create("sensor", kind, sensor_id=sensor_id, **cfg)
+    return sensor, {"tag": device_tag, "correct": device_tag_correct}
 
 
 def load_config(path: str | Path) -> AppConfig:
@@ -74,7 +78,17 @@ def load_config(path: str | Path) -> AppConfig:
     world_cfg = raw.get("world", {})
     world = World.from_config(world_cfg.get("zones", []), world_cfg.get("spots", []))
     items = ItemRegistry.from_config(raw.get("items", []), raw.get("item_sets", []))
-    sensors = [build_sensor(c) for c in raw.get("sensors", [])]
+    built = [build_sensor(c) for c in raw.get("sensors", [])]
+    sensors = [s for s, _ in built]
+
+    device_tags = None
+    tagged = [(s, m) for s, m in built if m["tag"] and hasattr(s, "position")]
+    if tagged:
+        from hometwin.devicetags import DeviceTagSolver
+
+        device_tags = DeviceTagSolver()
+        for s, m in tagged:
+            device_tags.register(m["tag"], s, auto_correct=m["correct"])
 
     # anchors map tag -> candidate positions (twin strips carry two marker
     # centers under one ID; the calibrator matches the nearest hypothesis)
@@ -106,6 +120,8 @@ def load_config(path: str | Path) -> AppConfig:
             sensor.attach_anchors(anchors)
         if movables is not None and hasattr(sensor, "attach_movables"):
             sensor.attach_movables(movables)
+        if device_tags is not None and hasattr(sensor, "attach_device_tags"):
+            sensor.attach_device_tags(device_tags)
 
     tracker = raw.get("tracker", {})
     api = raw.get("api", {})
@@ -123,6 +139,7 @@ def load_config(path: str | Path) -> AppConfig:
         save_interval_s=float(tracker.get("save_interval_s", 30.0)),
         anchors=anchors,
         movables=movables,
+        device_tags=device_tags,
         splat_asset=raw.get("world", {}).get("splat_asset"),
         splat_transform=raw.get("world", {}).get("splat_transform"),
         raw=raw,

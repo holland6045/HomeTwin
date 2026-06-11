@@ -58,6 +58,7 @@ class BLEScannerSensor(SensorAdapter):
         self.position = tuple(position)
         self.source = source
         self.model = PathLossModel(tx_power, exponent)
+        self.last_rssi: dict[str, tuple[float, float]] = {}  # mac -> (rssi, ts)
 
     def poll(self) -> list[RangeObservation]:
         if self.source is None:
@@ -65,6 +66,7 @@ class BLEScannerSensor(SensorAdapter):
         ts = self.clock()
         out = []
         for mac, rssi in self.source.readings():
+            self.last_rssi[mac.upper()] = (rssi, ts)
             d = self.model.rssi_to_range(rssi)
             out.append(
                 RangeObservation(

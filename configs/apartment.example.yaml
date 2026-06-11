@@ -122,6 +122,14 @@ sensors:
   # JSON-lines TCP ingest for MCU nodes (ESP32 BLE scanners, RTI link meshes,
   # anything). Raw "rssi" messages are converted with this path-loss model;
   # retrain it with: hometwin train path_loss
+  # BLE scanner with a printed tag ON the device: cameras triangulate it,
+  # refining the hand-measured anchor position every range depends on.
+  # - type: ble_scanner
+  #   id: ble-hall
+  #   position: [0.0, 4.0, 2.2]      # rough survey; cameras refine it
+  #   device_tag: "aruco:50"
+  #   device_tag_correct: true
+
   - type: network_bridge
     id: bridge
     port: 8787

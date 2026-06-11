@@ -120,6 +120,18 @@ def map_overlay(tracker) -> dict:
         "movables": (
             tracker.cfg.movables.snapshot() if getattr(tracker.cfg, "movables", None) else []
         ),
+        "device_tags": (
+            tracker.cfg.device_tags.snapshot()
+            if getattr(tracker.cfg, "device_tags", None)
+            else []
+        ),
+        "learning": {
+            "path_loss": tracker.learning_status() if hasattr(tracker, "learning_status") else [],
+            "sensor_trust": {
+                sid: round(tracker.engine.trust(sid), 2)
+                for sid in tracker.engine.sensor_nis
+            },
+        },
         "heatmaps": heatmaps,
         "cameras": cameras,
         "presence": tracker.presence,

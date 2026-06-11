@@ -204,6 +204,45 @@ def cmd_capture_snapshots(args) -> int:
     return 0 if captured else 1
 
 
+def cmd_webcam_test(args) -> int:
+    """Hardware smoke test: open the webcam, detect ArUco tags live."""
+    try:
+        import cv2
+    except ImportError:
+        print("webcam-test requires opencv: pip install hometwin[vision]", file=sys.stderr)
+        return 1
+    from hometwin.detectors.aruco import ArucoDetector
+
+    cap = cv2.VideoCapture(args.device)
+    if not cap.isOpened():
+        print(f"cannot open camera {args.device!r} — check the device index "
+              "(try --device 1) and that no other app holds the camera", file=sys.stderr)
+        return 1
+    det = ArucoDetector(dictionary=args.dictionary)
+    import time as _t
+
+    frames = hits = 0
+    t0 = _t.time()
+    print(f"watching device {args.device} for {args.seconds}s — show it a tag "
+          f"(hometwin make-anchor --id 7)", file=sys.stderr)
+    try:
+        while _t.time() - t0 < args.seconds:
+            ok, frame = cap.read()
+            if not ok:
+                continue
+            frames += 1
+            for d in det.detect(frame):
+                hits += 1
+                u, v = d.center
+                print(f"{d.tag_id} at u={u:.3f} v={v:.3f}")
+    finally:
+        cap.release()
+    dt = max(_t.time() - t0, 1e-6)
+    print(f"# {frames} frames in {dt:.1f}s ({frames / dt:.1f} fps), "
+          f"{hits} tag detections", file=sys.stderr)
+    return 0 if frames else 1
+
+
 def cmd_make_anchor(args) -> int:
     """Generate a printable blocky ArUco calibration target."""
     try:
@@ -334,6 +373,12 @@ def main(argv: list[str] | None = None) -> int:
 
     plugp = sub.add_parser("plugins", help="list available plugins")
     plugp.set_defaults(fn=cmd_plugins)
+
+    webp = sub.add_parser("webcam-test", help="open the webcam and detect tags live")
+    webp.add_argument("--device", type=int, default=0)
+    webp.add_argument("--seconds", type=int, default=15)
+    webp.add_argument("--dictionary", default="DICT_4X4_50")
+    webp.set_defaults(fn=cmd_webcam_test)
 
     ancp = sub.add_parser("make-anchor", help="generate a printable ArUco calibration target")
     ancp.add_argument("--id", type=int, required=True, help="marker id (use 100+ for anchors)")

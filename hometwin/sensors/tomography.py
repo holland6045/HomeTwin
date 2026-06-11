@@ -109,6 +109,8 @@ class TomographySensor(SensorAdapter):
         height_m: float = 1.0,
         label: str = "presence",
         min_attenuation_db: float = 2.0,
+        auto_rebaseline: bool = True,
+        rebaseline_after_s: float = 600.0,
     ):
         super().__init__(sensor_id)
         self.grid = RTIGrid(nodes, tuple(bounds), cell_m, lambda_m)
@@ -117,6 +119,10 @@ class TomographySensor(SensorAdapter):
         self.label = label
         self.min_atten = min_attenuation_db
         self._baseline: dict[tuple[str, str], float] = {}
+        self.auto_rebaseline = auto_rebaseline
+        self.rebaseline_after_s = rebaseline_after_s
+        self._atten_since: dict[tuple[str, str], float] = {}
+        self.rebaselined_links = 0
         self._last_image: list[list[float]] | None = None
         self._last_image_ts: float = 0.0
 
@@ -153,6 +159,7 @@ class TomographySensor(SensorAdapter):
         if self.source is None:
             return []
         atten: dict[tuple[str, str], float] = {}
+        now = self.clock()
         for a, b, rss in self.source.readings():
             key = self._key(a, b)
             base = self._baseline.get(key)
@@ -162,7 +169,21 @@ class TomographySensor(SensorAdapter):
                 continue
             loss = base - rss
             if loss >= self.min_atten:
-                atten[key] = loss
+                first = self._atten_since.setdefault(key, now)
+                if self.auto_rebaseline and now - first > self.rebaseline_after_s:
+                    # attenuation this persistent is furniture, not a person:
+                    # absorb it as the link's new normal
+                    self._baseline[key] = rss
+                    del self._atten_since[key]
+                    self.rebaselined_links += 1
+                else:
+                    atten[key] = loss
+            else:
+                self._atten_since.pop(key, None)
+                if self.auto_rebaseline:
+                    # track slow environment drift so it never accumulates
+                    # into phantom attenuation
+                    self._baseline[key] = 0.98 * base + 0.02 * rss
         if not atten:
             self._last_image = None
             return []

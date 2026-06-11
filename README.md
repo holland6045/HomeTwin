@@ -55,6 +55,11 @@ pip install -e .            # core: stdlib + PyYAML only
 pip install -e .[vision]    # optional: OpenCV cameras + ArUco
 pip install -e .[ml]        # optional: ONNX object detection
 
+# live on your PC with its webcam in three commands:
+hometwin make-anchor --id 7 -o tag-keys.png   # print, tape to your keys
+hometwin webcam-test                          # smoke test: detections + fps
+hometwin run -c configs/webcam-quickstart.yaml  # dashboard on :8080
+
 # zero-hardware demo: synthetic apartment with all three modalities
 hometwin simulate
 
@@ -162,6 +167,14 @@ makes a 25:7 strip for shelf edges with the marker kept at full plate
 height, and `--twin` repeats it at both ends for occlusion resistance.
 `hometwin snapshot-map` renders the live map overlay to SVG for
 headless previews.
+
+**Self-improvement:** every tracking path calibrates itself with use —
+camera poses heal against anchors and settled tags, BLE path-loss models
+learn from camera-confirmed distances, scanner positions are triangulated
+from `device_tag` markers on the devices themselves, fusion weights adapt
+to each sensor's demonstrated honesty, and tomography re-baselines around
+moved furniture. Each loop is feedback-gated and bounded:
+`docs/self-improvement.md`.
 
 **Soft references:** even non-anchor tags improve multi-camera
 registration — settled item tags (tight, stationary, multi-sensor

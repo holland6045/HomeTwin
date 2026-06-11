@@ -136,6 +136,7 @@ class CameraSensor(SensorAdapter):
         self.anchor_correct = anchor_correct
         self.calibrator = None
         self.movables = None
+        self.device_tags = None
         self._soft_refs: dict[str, tuple[tuple, float]] = {}
 
     def _ensure_calibrator(self):
@@ -150,6 +151,10 @@ class CameraSensor(SensorAdapter):
     def attach_movables(self, registry) -> None:
         """Share the tracker-wide movable registry (doors/drawers)."""
         self.movables = registry
+
+    def attach_device_tags(self, solver) -> None:
+        """Share the tracker-wide device-tag solver (tags on sensors)."""
+        self.device_tags = solver
 
     def update_soft_references(self, refs: dict[str, tuple[tuple, float]]) -> None:
         """Fused tag positions qualified by the tracker as references:
@@ -234,6 +239,10 @@ class CameraSensor(SensorAdapter):
                         det.tag_id, *det.center, ts, home, 0.03
                     )
                 continue
+            if self.device_tags and det.tag_id and self.device_tags.observe_ray(
+                det.tag_id, self.geometry.position, self.geometry.ray(*det.center), ts
+            ):
+                continue  # tag on a sensor device, not a tracked item
             if (
                 self.calibrator
                 and det.tag_id
