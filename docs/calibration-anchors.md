@@ -67,6 +67,36 @@ The bundled simulation proves the loop: the kitchen camera's configured yaw
 is deliberately 1.5° off its true mounting; the counter anchor pulls it
 back and the keys stay correctly placed (`tests/test_anchors.py`).
 
+## Twin strips and calibration
+
+A wide `--twin` strip carries the same marker ID at both ends. As an
+*item* tag this is harmless (two sightings simply average in the filter),
+but as a *calibration* anchor a twin strip surveyed as a single center
+point has a failure mode: with one end occluded — the very situation twin
+exists for — every sighting is offset by half the strip, biasing the pose
+by `atan(half-separation / distance)` (a 200 mm strip at 2 m ≈ 2°, twice
+the healthy threshold).
+
+Survey **both marker centers** instead; the calibrator matches each
+sighting against the nearest hypothesis (candidates sit degrees apart,
+detection noise is tenths of a degree, so association is unambiguous):
+
+```yaml
+world:
+  spots:
+    - name: shelf-b3
+      tag: "aruco:14"
+      position: [4.0, 2.0, 0.9]            # spot center, for item naming
+      tag_positions: [[4.0, 1.93, 0.9],    # left marker center
+                      [4.0, 2.07, 0.9]]    # right marker center
+  anchors:
+    - {tag: "aruco:100", positions: [[0.0, 0.0, 1.0], [0.2, 0.0, 1.0]]}
+```
+
+With `tag_positions` set, one visible end calibrates exactly; without it,
+prefer single-marker tags for anchors or accept the documented bias
+(`tests/test_anchors.py` demonstrates both behaviors).
+
 ## Shared reference across trackers
 
 Two cameras watching the same block correct against the same physical

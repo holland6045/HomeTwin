@@ -144,8 +144,8 @@ sensors: []
     assert cfg.world.locate_spot((1.0, 1.05, 0.6)) == "desk-drawer-2"
     # the tagged spot is a surveyed point: merged into the anchor map
     assert cfg.anchors == {
-        "aruco:100": (0.1, 0.1, 1.4),
-        "aruco:13": (1.0, 1.0, 0.6),
+        "aruco:100": [(0.1, 0.1, 1.4)],
+        "aruco:13": [(1.0, 1.0, 0.6)],
     }
     assert cfg.items.resolve_tag("aruco:22") == "box-03"
 

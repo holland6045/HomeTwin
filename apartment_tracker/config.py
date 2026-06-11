@@ -75,11 +75,16 @@ def load_config(path: str | Path) -> AppConfig:
     items = ItemRegistry.from_config(raw.get("items", []), raw.get("item_sets", []))
     sensors = [build_sensor(c) for c in raw.get("sensors", [])]
 
-    anchors = {str(a["tag"]): tuple(a["position"]) for a in world_cfg.get("anchors", [])}
+    # anchors map tag -> candidate positions (twin strips carry two marker
+    # centers under one ID; the calibrator matches the nearest hypothesis)
+    anchors: dict[str, list[tuple]] = {}
+    for a in world_cfg.get("anchors", []):
+        positions = a.get("positions") or [a["position"]]
+        anchors.setdefault(str(a["tag"]), []).extend(tuple(p) for p in positions)
     # a tagged spot is a surveyed fixed point: it calibrates cameras for free
     for spot in world.spots:
-        if spot.tag:
-            anchors.setdefault(str(spot.tag), tuple(spot.position))
+        if spot.tag and str(spot.tag) not in anchors:
+            anchors[str(spot.tag)] = [tuple(p) for p in (spot.tag_positions or [spot.position])]
     for sensor in sensors:
         if anchors and hasattr(sensor, "attach_anchors"):
             sensor.attach_anchors(anchors)

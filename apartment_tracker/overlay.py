@@ -16,6 +16,8 @@ import math
 import os
 import time
 
+from apartment_tracker.anchors import normalize_anchor_positions
+
 HEAT_MIN_VALUE = 0.05  # skip near-zero cells to bound payload size
 RING_SAMPLES = 36
 ITEM_HEIGHT_M = 0.8  # range spheres are drawn where items live, not at the anchor
@@ -97,7 +99,10 @@ def map_overlay(tracker) -> dict:
     ]
     anchors = [
         {"tag": tag, "position": list(pos)}
-        for tag, pos in getattr(tracker.cfg, "anchors", {}).items()
+        for tag, positions in normalize_anchor_positions(
+            getattr(tracker.cfg, "anchors", {})
+        ).items()
+        for pos in positions
     ]
     spots = [
         {"name": s.name, "position": list(s.position), "radius": s.radius, "tag": s.tag}

@@ -36,6 +36,9 @@ class Spot:
     position: tuple[float, float, float]
     radius: float = 0.25
     tag: str | None = None  # e.g. "aruco:13" — doubles as a calibration anchor
+    # twin strips: the two marker centers (calibration uses these, not the
+    # spot center, so an occluded end can't bias a camera's pose)
+    tag_positions: list[tuple[float, float, float]] | None = None
 
     def contains(self, p: tuple[float, float, float]) -> bool:
         return math.dist(p, self.position) <= self.radius
@@ -79,6 +82,7 @@ class World:
                     tuple(c["position"]),
                     float(c.get("radius", 0.25)),
                     c.get("tag"),
+                    [tuple(p) for p in c["tag_positions"]] if c.get("tag_positions") else None,
                 )
                 for c in (spot_cfgs or [])
             ],

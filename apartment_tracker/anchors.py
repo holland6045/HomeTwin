@@ -33,6 +33,18 @@ def _az_el(d: tuple[float, float, float]) -> tuple[float, float]:
     return math.atan2(d[1], d[0]), math.atan2(d[2], math.hypot(d[0], d[1]))
 
 
+def normalize_anchor_positions(anchors: dict) -> dict[str, list[tuple]]:
+    """Accept one position or a list per tag (twin strips have two marker
+    centers sharing one ID)."""
+    out: dict[str, list[tuple]] = {}
+    for tag, pos in anchors.items():
+        if pos and isinstance(pos[0], (int, float)):
+            out[tag] = [tuple(pos)]
+        else:
+            out[tag] = [tuple(p) for p in pos]
+    return out
+
+
 class AnchorCalibrator:
     def __init__(
         self,
@@ -44,7 +56,7 @@ class AnchorCalibrator:
         healthy_residual_deg: float = 1.0,
     ):
         self.geometry = geometry
-        self.anchors = {tag: tuple(pos) for tag, pos in anchors.items()}
+        self.anchors = normalize_anchor_positions(anchors)
         self.auto_correct = auto_correct
         self.alpha = alpha
         self.max_correction = math.radians(max_correction_deg)
@@ -56,19 +68,31 @@ class AnchorCalibrator:
 
     def observe(self, tag_id: str, u: float, v: float, ts: float) -> bool:
         """Process one detection. Returns True when the tag is an anchor
-        (caller must then NOT emit it as an item observation)."""
-        pos = self.anchors.get(tag_id)
-        if pos is None:
+        (caller must then NOT emit it as an item observation).
+
+        Tags with several candidate positions (twin strips: two markers, one
+        ID) resolve against the nearest hypothesis — candidates sit degrees
+        apart while detection noise is tenths of a degree, so a sighting of
+        either end calibrates correctly even with the other end occluded.
+        """
+        candidates = self.anchors.get(tag_id)
+        if candidates is None:
             return False
         geo = self.geometry
-        dx, dy, dz = (pos[i] - geo.position[i] for i in range(3))
-        n = math.sqrt(dx * dx + dy * dy + dz * dz)
-        if n < 1e-6:
-            return True
-        az_exp, el_exp = _az_el((dx / n, dy / n, dz / n))
         az_obs, el_obs = _az_el(geo.ray(u, v))
-        raz = _wrap(az_obs - az_exp)
-        rel = el_obs - el_exp
+        best: tuple[float, float] | None = None
+        for pos in candidates:
+            dx, dy, dz = (pos[i] - geo.position[i] for i in range(3))
+            n = math.sqrt(dx * dx + dy * dy + dz * dz)
+            if n < 1e-6:
+                continue
+            az_exp, el_exp = _az_el((dx / n, dy / n, dz / n))
+            r = (_wrap(az_obs - az_exp), el_obs - el_exp)
+            if best is None or math.hypot(*r) < math.hypot(*best):
+                best = r
+        if best is None:
+            return True
+        raz, rel = best
 
         self.last_seen[tag_id] = ts
         magnitude = math.degrees(math.hypot(raz, rel))
