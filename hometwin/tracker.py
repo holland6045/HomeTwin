@@ -331,6 +331,20 @@ class Tracker:
                 return entry
         return None
 
+    def add_anchor(self, tag: str, position: tuple) -> None:
+        """Drop a calibration anchor at runtime (dashboard/board-check)."""
+        with self._lock:
+            self.cfg.anchors.setdefault(tag, []).append(tuple(position))
+            for sensor in self.sensors:
+                if not hasattr(sensor, "attach_anchors"):
+                    continue
+                if getattr(sensor, "calibrator", None) is None:
+                    sensor.attach_anchors({tag: [tuple(position)]})
+                else:
+                    sensor.calibrator.anchors.setdefault(tag, []).append(
+                        tuple(position)
+                    )
+
     def tag_item(self, item_id: str, tag_id: str) -> None:
         with self._lock:
             self.cfg.items.tag_item(item_id, tag_id)

@@ -9,6 +9,8 @@ GET  /events           -> recent zone-change events, oldest first
 GET  /overlay/map      -> world-space layers for the top-down map view
 GET  /overlay/camera/<sensor_id> -> same layers projected into camera pixels
 POST /items/<id>/tags  -> {"tag": "ble:AA:.."} manual tagging at runtime
+POST /anchors          -> {"tag", "position"} drop a calibration anchor at
+                          runtime (map-click coords / board-check output)
 POST /assets/splat     -> replace the splat scan (raw body); atomic, no restart
 POST /assets/splat/transform -> update world.splat_transform at runtime
 
@@ -220,6 +222,17 @@ def make_handler(tracker: Tracker, policy: AuthPolicy):
                     return
                 tracker.cfg.splat_transform = body or None
                 self._send(200, {"status": "updated", "note": "runtime only — persist in config"})
+            elif parts == ["anchors"]:
+                length = int(self.headers.get("Content-Length", 0))
+                try:
+                    body = json.loads(self.rfile.read(length) or b"{}")
+                    tag = str(body["tag"])
+                    position = tuple(float(v) for v in body["position"])
+                except (KeyError, TypeError, ValueError):
+                    self._send(400, {"error": "need {tag, position: [x,y,z]}"})
+                    return
+                tracker.add_anchor(tag, position)
+                self._send(200, {"status": "anchored", "tag": tag})
             elif len(parts) == 3 and parts[0] == "items" and parts[2] == "tags":
                 length = int(self.headers.get("Content-Length", 0))
                 try:

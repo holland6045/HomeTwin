@@ -328,6 +328,98 @@ def cmd_webcam_test(args) -> int:
     return 0 if frames else 1
 
 
+def cmd_board_check(args) -> int:
+    """Precision instrument: a calibrated camera measures the board.
+
+    Lay the sheet anywhere — counter, shelf, floor. Reports the surface z,
+    tilt, depth/scale self-check (suggests a corrected hfov), and prints
+    ready-to-paste anchor/spot snippets at the measured world positions.
+    """
+    try:
+        import cv2
+    except ImportError:
+        print("board-check requires opencv: pip install hometwin[vision]", file=sys.stderr)
+        return 1
+    import time as _t
+
+    import yaml
+
+    from hometwin.board import MARKER_IDS, MARKER_MM
+    from hometwin.config import load_config
+    from hometwin.detectors.aruco import ArucoDetector
+    from hometwin.posefit import locate_board
+
+    cfg = load_config(args.config)
+    cam = next((s for s in cfg.sensors if s.sensor_id == args.camera
+                and hasattr(s, "geometry")), None)
+    if cam is None:
+        cams = [s.sensor_id for s in cfg.sensors if hasattr(s, "geometry")]
+        print(f"camera {args.camera!r} not in config (cameras: {cams})", file=sys.stderr)
+        return 1
+    import math as _m
+
+    hfov = _m.degrees(2.0 * _m.atan(cam.geometry.tan_h))
+    scale = (args.marker_mm / MARKER_MM) if args.marker_mm else 1.0
+    cap = cv2.VideoCapture(args.device)
+    if not cap.isOpened():
+        print(f"cannot open camera {args.device!r}", file=sys.stderr)
+        return 1
+    detector = ArucoDetector(dictionary=args.dictionary)._detector
+    wanted = set(MARKER_IDS)
+    reports = []
+    t0 = _t.time()
+    try:
+        while len(reports) < args.frames and _t.time() - t0 < args.timeout:
+            ok, frame = cap.read()
+            if not ok:
+                continue
+            corners, ids, _ = detector.detectMarkers(frame)
+            if ids is None:
+                continue
+            seen = {int(m): [tuple(pt) for pt in q[0]]
+                    for q, m in zip(corners, ids.flatten()) if int(m) in wanted}
+            if seen:
+                h, w = frame.shape[:2]
+                reports.append(locate_board(
+                    seen, cam.geometry, (w, h), hfov, scale,
+                    known_surface_z=args.surface_z))
+    finally:
+        cap.release()
+    if not reports:
+        print("never saw the board", file=sys.stderr)
+        return 1
+
+    n = len(reports)
+    z = sum(r["surface_z"] for r in reports) / n
+    tilt = sum(r["tilt_deg"] for r in reports) / n
+    origin = [round(sum(r["origin_world"][i] for r in reports) / n, 3) for i in range(3)]
+    ratios = [r["scale_ratio"] for r in reports if r["scale_ratio"]]
+    print(f"# board seen {n}x via {args.camera}", file=sys.stderr)
+    print(f"# surface z = {z:.3f} m   tilt = {tilt:.2f} deg   origin = {origin}",
+          file=sys.stderr)
+    if ratios:
+        ratio = sum(ratios) / len(ratios)
+        mms = [r["suggested_marker_mm"] for r in reports if r["suggested_marker_mm"]]
+        print(f"# print-scale ratio = {ratio:.4f} (1.0 = printed at 100%)",
+              file=sys.stderr)
+        if abs(ratio - 1.0) > 0.03 and mms:
+            print(f"# >3% off vs the known surface: the sheet printed scaled — "
+                  f"pass --marker-mm {sum(mms) / len(mms):.1f}", file=sys.stderr)
+    if tilt > 3.0:
+        print("# WARNING: board reads tilted — surface not flat or pose drift",
+              file=sys.stderr)
+    # ready-to-paste: the measured surface as a spot, the markers as anchors
+    last = reports[-1]
+    print(yaml.safe_dump({
+        "spots": [{"name": args.name, "position": origin, "radius": 0.3}],
+        "anchors": [
+            {"tag": f"aruco:{mid}", "position": pos}
+            for mid, pos in last["marker_positions_world"].items()
+        ],
+    }, sort_keys=False))
+    return 0
+
+
 def cmd_floorplan(args) -> int:
     """Extract + clean a floorplan from a listing URL (or image URL/file)."""
     from hometwin.floorplan import clean_floorplan, fetch, find_floorplan_url
@@ -537,6 +629,22 @@ def main(argv: list[str] | None = None) -> int:
     webp.add_argument("--seconds", type=int, default=15)
     webp.add_argument("--dictionary", default="DICT_4X4_250")
     webp.set_defaults(fn=cmd_webcam_test)
+
+    bchk = sub.add_parser("board-check",
+                          help="measure the board with a calibrated camera: "
+                               "surface z, scale/depth check, anchor snippets")
+    bchk.add_argument("-c", "--config", required=True)
+    bchk.add_argument("--camera", default="webcam", help="camera id in the config")
+    bchk.add_argument("--device", type=int, default=0)
+    bchk.add_argument("--name", default="measured-surface", help="spot name to emit")
+    bchk.add_argument("--marker-mm", type=float, help="printed size if not 100%%")
+    bchk.add_argument("--surface-z", type=float,
+                      help="known height of the surface the board lies on "
+                           "(floor: 0) — enables the print-scale check")
+    bchk.add_argument("--frames", type=int, default=20)
+    bchk.add_argument("--timeout", type=float, default=30.0)
+    bchk.add_argument("--dictionary", default="DICT_4X4_250")
+    bchk.set_defaults(fn=cmd_board_check)
 
     flp = sub.add_parser("floorplan",
                          help="extract + clean a floorplan from a listing URL")

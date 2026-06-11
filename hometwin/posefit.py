@@ -165,6 +165,125 @@ def camera_pose_from_board(
     return pose
 
 
+def _camera_world_rotation(geometry):
+    """World->camera rotation rows (right, down, forward) for our pinhole
+    convention — shared by locate_board."""
+    import numpy as np
+
+    sy, cy = math.sin(geometry.yaw), math.cos(geometry.yaw)
+    sp, cp = math.sin(geometry.pitch), math.cos(geometry.pitch)
+    right = (sy, -cy, 0.0)
+    down = (-sp * cy, -sp * sy, -cp)
+    forward = (cp * cy, cp * sy, -sp)
+    return np.array([right, down, forward], dtype=np.float64)
+
+
+def locate_board(
+    detections: dict[int, list[tuple[float, float]]],
+    geometry,
+    image_size: tuple[int, int],
+    hfov_deg: float,
+    scale: float = 1.0,
+    known_surface_z: float | None = None,
+) -> dict:
+    """The inverse instrument: a CALIBRATED camera measures the board.
+
+    World-coordinate agnostic — lay the sheet anywhere (counter, shelf,
+    floor) and get back where it is: board origin in world, the surface
+    plane z, tilt off horizontal — and, when `known_surface_z` is given
+    (floor = 0.0, a counter you've measured once), a print-scale check:
+    monocular planar scale is otherwise unobservable (the claimed size
+    cancels exactly — verified during development), but a wrong print
+    scale slides the solved board along the view ray, so the depth ratio
+    to the known surface recovers it and suggests the true --marker-mm.
+    """
+    try:
+        import cv2
+        import numpy as np
+    except ImportError as e:
+        raise RuntimeError(
+            "pose bootstrap requires opencv: pip install hometwin[vision]"
+        ) from e
+    from hometwin.board import SPACING_MM, board_layout, board_object_points
+
+    ids = sorted(detections)
+    if not ids:
+        raise ValueError("no board markers detected")
+    obj = np.array(
+        [pt for quad in board_object_points(ids, scale) for pt in quad],
+        dtype=np.float64,
+    )
+    img = np.ascontiguousarray(
+        np.array([pt for mid in ids for pt in detections[mid]], dtype=np.float64)
+    ).reshape(-1, 1, 2)
+    w, h = image_size
+    fx = w / (2.0 * math.tan(math.radians(hfov_deg) / 2.0))
+    K = np.array([[fx, 0, w / 2.0], [0, fx, h / 2.0], [0, 0, 1]], dtype=np.float64)
+
+    solutions = []
+    try:
+        _, rvecs, tvecs, _ = cv2.solvePnPGeneric(obj, img, K, None,
+                                                 flags=cv2.SOLVEPNP_IPPE)
+        solutions += list(zip(rvecs, tvecs))
+    except cv2.error:
+        pass
+    ok, rvec_i, tvec_i = cv2.solvePnP(obj, img, K, None, flags=cv2.SOLVEPNP_ITERATIVE)
+    if ok:
+        solutions.append((rvec_i, tvec_i))
+    if not solutions:
+        raise ValueError("PnP solve failed — board corners degenerate?")
+
+    R_wc = _camera_world_rotation(geometry)
+    C = np.array(geometry.position, dtype=np.float64)
+    best = None
+    for rvec, tvec in solutions:
+        R_cb, _ = cv2.Rodrigues(rvec)  # x_cam = R_cb x_board + t
+        proj, _ = cv2.projectPoints(obj, rvec, tvec, K, None)
+        err = float(np.linalg.norm(proj.reshape(-1, 2) - img.reshape(-1, 2), axis=1).mean())
+        origin_w = C + R_wc.T @ tvec.flatten()
+        axes_w = R_wc.T @ R_cb  # board axes as world columns
+        # a real sheet lies on a surface below the camera, normal up-ish
+        plausible = origin_w[2] < C[2] and axes_w[2, 2] > 0
+        cand = (err, origin_w, axes_w, plausible)
+        if best is None or (plausible and not best[3]) or (
+            plausible == best[3] and err < best[0]
+        ):
+            best = cand
+    err, origin_w, axes_w, _ = best
+
+    tilt = math.degrees(math.acos(max(min(float(axes_w[2, 2]), 1.0), -1.0)))
+    board_yaw = math.degrees(math.atan2(float(axes_w[1, 0]), float(axes_w[0, 0])))
+    out = {
+        "origin_world": [round(float(v), 3) for v in origin_w],
+        "surface_z": round(float(origin_w[2]), 3),
+        "board_yaw_deg": round(board_yaw, 2),
+        "tilt_deg": round(tilt, 2),
+        "reprojection_error_px": round(err, 3),
+        "markers_used": ids,
+        "marker_positions_world": {},
+        "scale_ratio": None,
+        "suggested_marker_mm": None,
+    }
+    layout = board_layout(scale)
+    for mid in ids:
+        cx, cy2 = layout["centers"][mid]
+        pos = origin_w + axes_w @ np.array([cx, cy2, 0.0])
+        out["marker_positions_world"][mid] = [round(float(v), 3) for v in pos]
+
+    if known_surface_z is not None:
+        cam_drop = float(C[2]) - known_surface_z
+        solved_drop = float(C[2]) - float(origin_w[2])
+        if abs(solved_drop) > 0.05 and abs(cam_drop) > 0.05:
+            # wrong print scale slides the board along the view ray: the
+            # depth ratio against the known surface recovers the true scale
+            ratio = cam_drop / solved_drop
+            out["scale_ratio"] = round(ratio, 4)
+            from hometwin.board import MARKER_MM
+
+            out["suggested_marker_mm"] = round(MARKER_MM * scale * ratio, 1)
+    return out
+
+
 def average_poses(poses: list[dict]) -> dict:
     """Average several single-frame solves (angles via vector mean)."""
     n = len(poses)

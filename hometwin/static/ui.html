@@ -701,6 +701,19 @@ async function tick() {
   } catch (e) { /* tracker restarting; retry next tick */ }
 }
 
+canvas.addEventListener("click", (ev) => {
+  if (state.view !== "map" || !state.data) return;
+  const rect = canvas.getBoundingClientRect();
+  const px = ev.clientX - rect.left, py = ev.clientY - rect.top;
+  const T = mapTransform(state.data);
+  const [ox, oy, s] = T([0, 0]);
+  const wx = (px - ox) / s, wy = (oy - py) / s;
+  const text = `[${wx.toFixed(2)}, ${wy.toFixed(2)}, 0.0]`;
+  navigator.clipboard?.writeText(text).catch(() => {});
+  ctx.fillStyle = "#ffd400"; ctx.font = "12px ui-monospace, monospace";
+  ctx.fillText(`world ${text} (copied)`, px + 10, py - 8);
+});
+
 buildLayerToggles();
 buildTabs();
 tick();

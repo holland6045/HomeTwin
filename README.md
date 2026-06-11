@@ -76,7 +76,7 @@ hometwin where keys
 hometwin plugins   # list everything installed
 ```
 
-Run the tests with `pytest` (44 tests, no hardware or heavy deps needed).
+Run the tests with `pytest` (190+ tests; the vision suite needs `opencv-contrib-python-headless` + `numpy`, everything else is stdlib).
 
 ## Design
 
