@@ -51,6 +51,7 @@
 <script>
 "use strict";
 const LAYERS = [
+  ["floorplan", "Floorplan", true],
   ["zones", "Zones", true],
   ["heat", "Tomography heat", true],
   ["rings", "BLE ranges", true],
@@ -156,9 +157,27 @@ function mapTransform(d) {
   return p => [pad + (p[0] - b.xmin) * s, canvas.height - pad - (p[1] - b.ymin) * s, s];
 }
 
+let floorplanImg = null;
+function ensureFloorplan(meta) {
+  if (!meta || floorplanImg) return;
+  floorplanImg = new Image();
+  floorplanImg.src = assetUrl("/assets/floorplan");
+}
+
 function renderMap(d) {
   const T = mapTransform(d);
   const scale = T([0, 0])[2];
+
+  if (on("floorplan") && d.floorplan) {
+    ensureFloorplan(d.floorplan);
+    if (floorplanImg && floorplanImg.complete && floorplanImg.naturalWidth) {
+      const [x0, y0] = T([0, d.floorplan.height_m]);
+      ctx.globalAlpha = 0.45;
+      ctx.drawImage(floorplanImg, x0, y0,
+                    d.floorplan.width_m * scale, d.floorplan.height_m * scale);
+      ctx.globalAlpha = 1;
+    }
+  }
 
   if (on("zones")) for (const z of d.zones) {
     const [x0, y0] = T(z.min), [x1, y1] = T(z.max);

@@ -34,6 +34,7 @@ class AppConfig:
     movables: object = None  # MovableRegistry (doors/drawers) or None
     device_tags: object = None  # DeviceTagSolver (tags on sensors) or None
     splat_asset: str | None = None  # .splat/.ply scan rendered by the dashboard's 3D tab
+    floorplan: dict | None = None  # {image, width_m}: map-view background
     splat_transform: dict | None = None  # aligns the scan to the world frame
     raw: dict = field(default_factory=dict)
 
@@ -142,6 +143,7 @@ def load_config(path: str | Path) -> AppConfig:
         anchors=anchors,
         movables=movables,
         device_tags=device_tags,
+        floorplan=raw.get("world", {}).get("floorplan"),
         splat_asset=raw.get("world", {}).get("splat_asset"),
         splat_transform=raw.get("world", {}).get("splat_transform"),
         raw=raw,

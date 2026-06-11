@@ -328,6 +328,43 @@ def cmd_webcam_test(args) -> int:
     return 0 if frames else 1
 
 
+def cmd_floorplan(args) -> int:
+    """Extract + clean a floorplan from a listing URL (or image URL/file)."""
+    from hometwin.floorplan import clean_floorplan, fetch, find_floorplan_url
+
+    src = args.source
+    if src.startswith(("http://", "https://")):
+        data = fetch(src)
+        if data[:4] not in (b"\x89PNG", b"\xff\xd8\xff\xe0", b"\xff\xd8\xff\xe1") \
+                and b"<" in data[:512]:
+            url = find_floorplan_url(data.decode("utf-8", errors="replace"), src)
+            if not url:
+                print("no floorplan image found on that page — pass the image URL "
+                      "directly", file=sys.stderr)
+                return 1
+            print(f"# found {url}", file=sys.stderr)
+            data = fetch(url)
+    else:
+        with open(src, "rb") as f:
+            data = f.read()
+    try:
+        png = clean_floorplan(data)
+    except (RuntimeError, ValueError) as e:
+        print(e, file=sys.stderr)
+        return 1
+    with open(args.output, "wb") as f:
+        f.write(png)
+    print(args.output)
+    print(f"""# config (world width measured/printed on the listing):
+world:
+  floorplan:
+    image: {args.output}
+    width_m: {args.width_m}
+# world (0,0) = the plan's bottom-left; lay the origin board there and the
+# frames coincide.""", file=sys.stderr)
+    return 0
+
+
 def cmd_make_board(args) -> int:
     """Generate the printable origin board (lay flat = world origin set)."""
     from hometwin.board import MARKER_IDS, board_svg
@@ -500,6 +537,14 @@ def main(argv: list[str] | None = None) -> int:
     webp.add_argument("--seconds", type=int, default=15)
     webp.add_argument("--dictionary", default="DICT_4X4_250")
     webp.set_defaults(fn=cmd_webcam_test)
+
+    flp = sub.add_parser("floorplan",
+                         help="extract + clean a floorplan from a listing URL")
+    flp.add_argument("source", help="listing URL, image URL, or local image file")
+    flp.add_argument("--width-m", type=float, default=10.0,
+                     help="real-world width of the plan in metres")
+    flp.add_argument("-o", "--output", default="floorplan.png")
+    flp.set_defaults(fn=cmd_floorplan)
 
     brdp = sub.add_parser("make-board",
                           help="printable origin board: lay flat, it IS the world origin")

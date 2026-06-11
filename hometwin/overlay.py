@@ -23,6 +23,17 @@ RING_SAMPLES = 36
 ITEM_HEIGHT_M = 0.8  # range spheres are drawn where items live, not at the anchor
 
 
+def _floorplan_meta_cached(tracker) -> dict | None:
+    meta = getattr(tracker, "_floorplan_meta", "unset")
+    if meta == "unset":
+        from hometwin.floorplan import floorplan_meta
+
+        meta = tracker._floorplan_meta = floorplan_meta(
+            getattr(tracker.cfg, "floorplan", None)
+        )
+    return meta
+
+
 def _splat_version(path: str | None) -> int | None:
     """mtime-based version so the UI reloads the scan after a hot swap."""
     if not path:
@@ -135,6 +146,7 @@ def map_overlay(tracker) -> dict:
         "cameras": cameras,
         "presence": tracker.presence,
         "events": st["events"],
+        "floorplan": _floorplan_meta_cached(tracker),
         "splat": bool(getattr(tracker.cfg, "splat_asset", None)),
         "splat_transform": getattr(tracker.cfg, "splat_transform", None),
         "splat_version": _splat_version(getattr(tracker.cfg, "splat_asset", None)),
