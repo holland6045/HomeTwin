@@ -283,6 +283,14 @@ comparison per request or connection — fusion and polling are untouched
 - **TLS**: deliberately delegated to a reverse proxy (caddy/nginx) in
   front of the localhost-bound API.
 
+## On a Mac: HomeTwin.app
+
+`packaging/macos/build_app.sh` builds a drag-to-Applications app whose
+launcher owns a venv under Application Support and **self-updates from the
+git channel branch on every launch** — relaunching the app is the update
+while we iterate. Details: `docs/macos-app.md`. The hardware rollout is
+chunked into testable blocks in `docs/development-plan.md`.
+
 ## Repository layout
 
 ```
