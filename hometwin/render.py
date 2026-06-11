@@ -9,6 +9,8 @@ from __future__ import annotations
 
 ITEM_COLORS = ["#4ea1ff", "#ff7eb6", "#66d98c", "#c9a227", "#8a7dff", "#ff9d5c"]
 W, H, PAD = 880.0, 660.0, 40.0
+LAYER_CHIPS = ["Zones", "Tomography heat", "BLE ranges", "Camera rays", "Trails",
+               "Anchors", "Spots", "Doors/drawers", "Items", "Presence"]
 
 
 def _bounds(zones: list[dict]) -> tuple[float, float, float, float]:
@@ -151,5 +153,88 @@ def map_svg(d: dict) -> str:
         el.append(f'<text x="{px + 8:.1f}" y="{py + 7:.1f}" font-size="9" fill="#7d8696">'
                   f'{where} ±{it["sigma_m"]}m</text>')
 
+    el.append("</svg>")
+    return "\n".join(el)
+
+
+def dashboard_svg(d: dict) -> str:
+    """Full-dashboard preview: header chrome, tabs, layer toggles, the map
+    view, and the items/movables/events side panels — a faithful static
+    rendering of static/ui.html for headless screenshots."""
+    DW, DH = 1280.0, 800.0
+    mono = 'font-family="system-ui, sans-serif"'
+    el = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {DW:.0f} {DH:.0f}" {mono}>',
+        f'<rect width="{DW:.0f}" height="{DH:.0f}" fill="#14171c"/>',
+        '<rect width="1280" height="92" fill="#1d2128"/>',
+        '<text x="16" y="34" font-size="16" font-weight="600" fill="#d9dee7">HomeTwin</text>',
+    ]
+    # tabs
+    x = 130.0
+    tabs = ["Map"] + ["📷 " + c["sensor_id"] for c in d.get("cameras", [])] + ["🧊 3D"]
+    for i, label in enumerate(tabs):
+        w = 16 + len(label) * 7.4
+        color = "#4ea1ff" if i == 0 else "#333a45"
+        tcol = "#4ea1ff" if i == 0 else "#d9dee7"
+        el.append(f'<rect x="{x:.0f}" y="14" width="{w:.0f}" height="26" rx="6" '
+                  f'fill="none" stroke="{color}"/>')
+        el.append(f'<text x="{x + 8:.0f}" y="32" font-size="13" fill="{tcol}">{label}</text>')
+        x += w + 8
+    # layer toggle chips
+    x = 130.0
+    for label in LAYER_CHIPS:
+        w = 34 + len(label) * 6.6
+        el.append(f'<rect x="{x:.0f}" y="50" width="{w:.0f}" height="24" rx="6" '
+                  f'fill="none" stroke="#333a45"/>')
+        el.append(f'<rect x="{x + 8:.0f}" y="57" width="10" height="10" fill="#4ea1ff"/>')
+        el.append(f'<text x="{x + 24:.0f}" y="66" font-size="12" fill="#d9dee7">{label}</text>')
+        x += w + 8
+    # map canvas (nested svg keeps its own coordinate system)
+    inner = map_svg(d).replace("<svg ", '<svg x="12" y="104" width="900" height="676" ', 1)
+    el.append(inner)
+    # side panels
+    px, pw = 928.0, 338.0
+
+    def card(y, h, title):
+        el.append(f'<rect x="{px:.0f}" y="{y:.0f}" width="{pw:.0f}" height="{h:.0f}" '
+                  f'rx="8" fill="#1d2128"/>')
+        el.append(f'<text x="{px + 12:.0f}" y="{y + 22:.0f}" font-size="12" fill="#7d8696" '
+                  f'letter-spacing="1">{title}</text>')
+
+    card(104, 30 + 26 * max(len(d.get("items", [])), 1), "ITEMS")
+    y = 104 + 44
+    for it in d.get("items", []):
+        where = it.get("maybe_in") and f"likely in {it['maybe_in']}" or it.get("spot") \
+            or it.get("zone") or ("never seen" if it.get("status") == "never_seen" else "?")
+        el.append(f'<text x="{px + 12:.0f}" y="{y:.0f}" font-size="13" '
+                  f'fill="#d9dee7">{it["name"]}</text>')
+        detail = where if it.get("position") is None else \
+            f'{where} ±{it.get("sigma_m", "?")}m {it.get("age_s", "")}s'
+        el.append(f'<text x="{px + pw - 12:.0f}" y="{y:.0f}" font-size="12" fill="#4ea1ff" '
+                  f'text-anchor="end">{detail}</text>')
+        y += 26
+    my = y + 18
+    movs = d.get("movables", [])
+    card(my, 30 + 26 * max(len(movs), 1), "DOORS / DRAWERS")
+    y = my + 44
+    for m in movs:
+        state = "OPEN" if m["is_open"] else "closed"
+        col = "#9dff00" if m["is_open"] else "#7d8696"
+        el.append(f'<text x="{px + 12:.0f}" y="{y:.0f}" font-size="13" '
+                  f'fill="#d9dee7">{m["name"]}</text>')
+        el.append(f'<text x="{px + pw - 12:.0f}" y="{y:.0f}" font-size="12" fill="{col}" '
+                  f'text-anchor="end">{state} {int(m["openness"] * 100)}%</text>')
+        y += 26
+    ey = y + 18
+    events = list(d.get("events", []))[-8:]
+    card(ey, 30 + 22 * max(len(events), 1), "EVENTS")
+    y = ey + 42
+    for e in reversed(events):
+        text = (f'{e["movable"]}: {e["event"]}' if e.get("event")
+                else f'{e["item_id"]}: {e.get("from_spot") or e.get("from_zone") or "?"} '
+                     f'→ {e.get("to_spot") or e.get("to_zone") or "?"}')
+        el.append(f'<text x="{px + 12:.0f}" y="{y:.0f}" font-size="11" '
+                  f'fill="#7d8696">{text}</text>')
+        y += 22
     el.append("</svg>")
     return "\n".join(el)

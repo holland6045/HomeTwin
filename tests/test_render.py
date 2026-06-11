@@ -26,3 +26,18 @@ def test_map_svg_contains_all_layers():
 def test_map_svg_empty_overlay():
     svg = map_svg({"zones": [], "items": []})
     assert svg.startswith("<svg") and svg.endswith("</svg>")
+
+
+def test_dashboard_svg_renders_chrome_and_panels():
+    from hometwin.render import dashboard_svg
+
+    tracker, state = build_simulation(seed=1)
+    for _ in range(70):
+        state.tick()
+        tracker.step()
+    d = map_overlay(tracker)
+    d["items"] = tracker.snapshot()
+    svg = dashboard_svg(d)
+    for needle in ("HomeTwin", "📷 cam-kitchen", "🧊 3D", "ITEMS",
+                   "DOORS / DRAWERS", "utensil-drawer", "EVENTS", "Doors/drawers"):
+        assert needle in svg, needle
