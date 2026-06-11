@@ -49,6 +49,8 @@ def cmd_where(args) -> int:
         print(f"{entry['name']}: never seen")
     else:
         zone = entry.get("spot") or entry.get("zone") or "outside known zones"
+        if entry.get("maybe_in"):
+            zone = f"likely inside {entry['maybe_in']} ({zone})"
         pos = entry.get("position")
         print(
             f"{entry['name']}: {zone} at ({pos[0]}, {pos[1]}, {pos[2]}) "
@@ -239,9 +241,13 @@ def cmd_make_tag(args) -> int:
     except RuntimeError as e:
         print(e, file=sys.stderr)
         return 1
+    twin_bits = None
+    if args.twin_id is not None:
+        twin_bits = marker_bits(args.dictionary, args.twin_id)
     ident = args.ident or f"TAG/{args.id:02d}"
     svg = tag_svg(bits, ident, caption=args.caption, palette=args.palette,
-                  size_mm=args.size_mm, layout=args.layout, twin=args.twin)
+                  size_mm=args.size_mm, layout=args.layout, twin=args.twin,
+                  twin_bits=twin_bits)
     out = args.output or f"tag-{args.id}.svg"
     with open(out, "w", encoding="utf-8") as f:
         f.write(svg)
@@ -346,7 +352,10 @@ def main(argv: list[str] | None = None) -> int:
     tagp.add_argument("--layout", default="portrait", choices=["portrait", "wide"],
                       help="wide: 25:7 strip for shelf edges; marker keeps full height")
     tagp.add_argument("--twin", action="store_true",
-                      help="wide only: repeat the marker at both ends (occlusion-proof)")
+                      help="wide only: repeat the SAME marker at both ends")
+    tagp.add_argument("--twin-id", type=int,
+                      help="wide only: DIFFERENT marker id for the right end — "
+                           "preferred for anchors (each end is unambiguous)")
     tagp.add_argument("-o", "--output")
     tagp.set_defaults(fn=cmd_make_tag)
 

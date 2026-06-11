@@ -84,6 +84,17 @@ class Tracker:
                 continue
             for obs in batch:
                 count += 1
+                # remote cameras report movable tags as bearings: route to
+                # the door/drawer state estimator, not the fusion engine
+                if (
+                    self.cfg.movables is not None
+                    and isinstance(obs, BearingObservation)
+                    and obs.item_id
+                    and self.cfg.movables.observe_ray(
+                        obs.item_id, obs.origin, obs.direction, obs.timestamp
+                    )
+                ):
+                    continue
                 with self._lock:
                     applied = self.engine.ingest(obs)
                 if applied:
@@ -110,6 +121,8 @@ class Tracker:
                         "timestamp": obs.timestamp,
                     }
         self._record_zone_changes(touched)
+        if self.cfg.movables is not None:
+            self.events.extend(self.cfg.movables.drain_events())
         return count
 
     def _record_zone_changes(self, item_ids: set[str]) -> None:
@@ -158,7 +171,33 @@ class Tracker:
 
     def snapshot(self) -> list[dict]:
         with self._lock:
-            return self.engine.snapshot()
+            snap = self.engine.snapshot()
+        self._annotate_stowed(snap)
+        return snap
+
+    def _annotate_stowed(self, snap: list[dict]) -> None:
+        """Infer "item is probably inside that drawer": last seen near the
+        movable's spot while it was open, unseen since it closed."""
+        if self.cfg.movables is None:
+            return
+        spots = {s.name: s for s in self.cfg.world.spots}
+        for m in self.cfg.movables.movables:
+            spot = spots.get(m.spot) if m.spot else None
+            if spot is None:
+                continue
+            st = self.cfg.movables.states[m.name]
+            if st.is_open or st.closed_ts <= st.opened_ts:
+                continue  # currently open, or never cycled
+            for entry in snap:
+                track = self.engine.tracks.get(entry["item_id"])
+                if track is None or entry.get("position") is None:
+                    continue
+                if (
+                    track.last_update <= st.closed_ts
+                    and track.last_update >= st.opened_ts - 5.0
+                    and math.dist(track.position, spot.position) <= spot.radius * 1.5
+                ):
+                    entry["maybe_in"] = m.name
 
     def find(self, query: str) -> dict | None:
         """Locate one item by id or (case-insensitive) name."""

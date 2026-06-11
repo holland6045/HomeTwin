@@ -223,6 +223,17 @@ def test_wide_tag_twin_markers():
     assert "hzw" in single and "hzw" not in twin
 
 
+def test_wide_tag_distinct_lr_codes():
+    """L/R twin: a DIFFERENT marker id on the right end — each end becomes
+    an ordinary unambiguous anchor."""
+    left = checker_bits()
+    right = [[1 - b for b in row] for row in left]  # inverted: distinct pattern
+    svg = tag_svg(left, "X", layout="wide", twin_bits=right)
+    total = sum(sum(r) for r in left) + sum(sum(r) for r in right)
+    assert svg.count('width="27.50"') == total
+    assert "hzw" not in svg  # twin replaces the hazard strip
+
+
 def test_tag_svg_rejects_unknown_layout():
     with pytest.raises(ValueError, match="layout"):
         tag_svg(checker_bits(), "X", layout="circular")

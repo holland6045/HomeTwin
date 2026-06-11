@@ -96,6 +96,16 @@ def map_svg(d: dict) -> str:
         el.append(f'<polyline points="{pts}" fill="none" stroke="{color_of(tr["item_id"])}" '
                   f'stroke-width="2" opacity="0.45"/>')
 
+    for m in d.get("movables", []):
+        pts = " ".join(f"{T(p)[0]:.1f},{T(p)[1]:.1f}" for p in m["path"])
+        el.append(f'<polyline points="{pts}" fill="none" stroke="#39414e" stroke-width="2"/>')
+        tx, ty = T(m["tag_pos"])
+        color = "#9dff00" if m["is_open"] else "#566073"
+        el.append(f'<circle cx="{tx:.1f}" cy="{ty:.1f}" r="4" fill="{color}"/>')
+        state = "OPEN" if m["is_open"] else "closed"
+        el.append(f'<text x="{tx + 7:.1f}" y="{ty + 4:.1f}" font-size="10" '
+                  f'fill="#7d8696">{m["name"]} {state}</text>')
+
     for sp in d.get("spots", []):
         px, py = T(sp["position"])
         el.append(f'<circle cx="{px:.1f}" cy="{py:.1f}" r="{max(sp["radius"] * s, 3):.1f}" '

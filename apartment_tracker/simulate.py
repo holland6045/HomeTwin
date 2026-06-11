@@ -19,6 +19,7 @@ from apartment_tracker.sensors.ble import BLEScannerSensor, RSSISource
 from apartment_tracker.sensors.camera import CameraGeometry, CameraSensor
 from apartment_tracker.sensors.tomography import LinkSource, TomographySensor
 from apartment_tracker.tracker import Tracker
+from apartment_tracker.movables import Movable, MovableRegistry
 from apartment_tracker.world import Spot, World, Zone
 
 WALLET_MAC = "AA:11:22:33:44:55"
@@ -28,6 +29,16 @@ TRUE_KEYS = (6.5, 1.0, 0.9)  # kitchen counter
 TRUE_WALLET = (2.0, 3.2, 0.45)  # sofa
 ANCHOR_TAG = "aruco:100"
 ANCHOR_POS = (6.9, 1.5, 0.9)  # blocky calibration target on the counter
+DRAWER_TAG = "aruco:40"
+DRAWER = Movable(
+    name="utensil-drawer",
+    tag=DRAWER_TAG,
+    motion="slide",
+    home=(6.7, 1.55, 0.72),  # tag on the drawer front, under the counter lip
+    axis=(0.0, 1.0, 0.0),
+    travel=0.35,
+    spot="utensil-drawer",
+)
 CAM_KITCHEN_YAW_TRUE = -110.0
 CAM_KITCHEN_YAW_BUMPED = -108.5  # config is 1.5 deg off; the anchor heals it
 
@@ -64,6 +75,13 @@ class SimWorldState:
     def phone(self) -> tuple[float, float, float]:
         return (self.person[0], self.person[1], 1.0)
 
+    @property
+    def drawer_openness(self) -> float:
+        # drawer opens 10s in, stays open 10s, closes
+        if self.t < 10.0 or self.t > 25.0:
+            return 0.0
+        return min((self.t - 10.0) / 2.0, 1.0) if self.t < 20.0 else max((25.0 - self.t) / 2.0, 0.0)
+
 
 class SimArucoDetector:
     """Reports the keys' tag and the calibration anchor as the *physical*
@@ -88,6 +106,31 @@ class SimArucoDetector:
 class SimFrameSource:
     def get_frame(self):
         return object()  # opaque; the sim detector ignores it
+
+
+class SimDrawerDetector:
+    """Sees the drawer-front tag at its true articulated position. Uses its
+    own RNG so adding it does not resequence the main noise stream."""
+
+    def __init__(self, geo: CameraGeometry, state: SimWorldState, seed: int):
+        self.geo, self.state = geo, state
+        self.rng = random.Random(seed ^ 0xD0D0)
+
+    def detect(self, frame) -> list[Detection]:
+        pix = project_to_pixel(self.geo, DRAWER.position_at(self.state.drawer_openness))
+        if pix is None:
+            return []
+        u = pix[0] + self.rng.gauss(0, 0.003)
+        v = pix[1] + self.rng.gauss(0, 0.003)
+        return [Detection(label="aruco", confidence=1.0, bbox=(u, v, 0.0, 0.0), tag_id=DRAWER_TAG)]
+
+
+class SimCompositeDetector:
+    def __init__(self, *detectors):
+        self.detectors = detectors
+
+    def detect(self, frame) -> list[Detection]:
+        return [d for det in self.detectors for d in det.detect(frame)]
 
 
 class SimPhoneDetector:
@@ -157,7 +200,10 @@ def build_simulation(seed: int = 1) -> tuple[Tracker, SimWorldState]:
             Zone("sofa", (1.5, 2.8, 0.3), (3.0, 3.8, 0.7)),
         ],
         # spot-level precision: the tray on the counter where keys belong
-        [Spot("counter-tray", (6.5, 1.0, 0.9), radius=0.35)],
+        [
+            Spot("counter-tray", (6.5, 1.0, 0.9), radius=0.35),
+            Spot("utensil-drawer", (6.7, 1.45, 0.7), radius=0.3),
+        ],
     )
     items = ItemRegistry()
     items.add(Item("keys", "House keys", labels=["keys"], tag_ids=["aruco:7"]))
@@ -172,16 +218,20 @@ def build_simulation(seed: int = 1) -> tuple[Tracker, SimWorldState]:
     cfg_geo = CameraGeometry(
         position=(7.5, 3.8, 2.3), yaw_deg=CAM_KITCHEN_YAW_BUMPED, pitch_deg=40.0, hfov_deg=80.0
     )
+    movables = MovableRegistry([DRAWER])
     camera = CameraSensor(
         "cam-kitchen",
         geometry=cfg_geo,
         frame_source=SimFrameSource(),
-        detector=SimArucoDetector(true_geo, state),
+        detector=SimCompositeDetector(
+            SimArucoDetector(true_geo, state), SimDrawerDetector(true_geo, state, seed)
+        ),
         surface_z=TRUE_KEYS[2],
         base_sigma_m=0.1,
         anchor_correct=True,
     )
     camera.attach_anchors({ANCHOR_TAG: ANCHOR_POS})
+    camera.attach_movables(movables)
 
     # two overlapping living-room cameras in ray mode: their sight rays are
     # triangulated by the fusion engine — no surface assumption for the phone
@@ -237,6 +287,7 @@ def build_simulation(seed: int = 1) -> tuple[Tracker, SimWorldState]:
         sensors=[camera, *ray_cams, *scanners, rti],
         poll_hz=2.0,
         anchors={ANCHOR_TAG: ANCHOR_POS},
+        movables=movables,
     )
     for sensor in cfg.sensors:
         sensor.clock = lambda: state.now

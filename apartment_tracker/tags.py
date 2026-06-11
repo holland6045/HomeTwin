@@ -83,6 +83,7 @@ def tag_svg(
     size_mm: float = 60.0,
     layout: str = "portrait",
     twin: bool = False,
+    twin_bits: list[list[int]] | None = None,
 ) -> str:
     """Render a styled label around an ArUco bit matrix.
 
@@ -93,7 +94,9 @@ def tag_svg(
     marker spans nearly the full plate height — camera read range is set
     by marker size, so the strip shrinks around it instead of shrinking
     it. `twin=True` repeats the marker at the far end so a partially
-    occluded edge still reads.
+    occluded edge still reads; pass `twin_bits` (a DIFFERENT marker ID)
+    to make the right end distinct — preferred for calibration anchors,
+    since each end becomes an ordinary unambiguous reference point.
 
     size_mm is the printed width; height follows the aspect.
     """
@@ -116,7 +119,13 @@ def tag_svg(
             '<rect x="964" y="260" width="22" height="6"/><rect x="980" y="244" width="6" height="22"/>'
             "</g>"
         ).format(c=accent)
-        second = _marker_field(bits, W - 30 - side, 30, side) if twin else ""
+        if twin_bits is not None:
+            twin = True
+        second = (
+            _marker_field(twin_bits if twin_bits is not None else bits, W - 30 - side, 30, side)
+            if twin
+            else ""
+        )
         text_right = W - 30 - side - 30 if twin else W - 40
         sub = f"{caption_text} // APT.TRACKER"
         if 280 + len(sub) * (22 * 0.62 + 5) > text_right:  # would crowd the marker

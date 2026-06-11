@@ -22,6 +22,24 @@ world:
   # spots:
   #   - {name: desk-drawer-2, tag: "aruco:13", position: [1.0, 1.0, 0.6], radius: 0.2}
   #   - {name: shelf-b3,      tag: "aruco:14", position: [3.5, 0.2, 1.6], radius: 0.3}
+  # Tags on moving surfaces (doors, drawers): one-DOF motion models turn
+  # them into open/closed sensors. Never used for calibration. With `spot`
+  # linked, "keys last seen at the open drawer, drawer closed, keys gone"
+  # becomes "keys: likely inside utensil-drawer".
+  # movables:
+  #   - name: utensil-drawer
+  #     tag: "aruco:40"
+  #     motion: slide
+  #     home: [6.7, 1.55, 0.72]    # tag position fully closed
+  #     axis: [0, 1, 0]            # opening direction
+  #     travel: 0.35               # metres of extension
+  #     spot: utensil-drawer
+  #   - name: closet-door
+  #     tag: "aruco:41"
+  #     motion: hinge
+  #     home: [3.0, 0.05, 1.2]     # tag position closed
+  #     hinge: [2.6, 0.05]         # vertical hinge line (x, y)
+  #     max_angle_deg: 110
   zones:
     - {name: living_room,     min: [0, 0, 0],        max: [5, 4, 2.6]}
     - {name: kitchen,         min: [5, 0, 0],        max: [8, 4, 2.6]}

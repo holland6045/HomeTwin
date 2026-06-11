@@ -58,6 +58,7 @@ const LAYERS = [
   ["trails", "Trails", true],
   ["anchors", "Anchors", true],
   ["spots", "Spots", true],
+  ["movables", "Doors/drawers", true],
   ["items", "Items", true],
   ["presence", "Presence", true],
 ];
@@ -220,6 +221,19 @@ function renderMap(d) {
     ctx.fillStyle = "rgba(138,125,255,0.25)";
     ctx.beginPath(); ctx.arc(px, py, d.presence.sigma_m * scale, 0, 7); ctx.fill();
     ctx.fillStyle = "#8a7dff"; ctx.fillText("presence", px + 6, py);
+  }
+
+  if (on("movables")) for (const m of (d.movables || [])) {
+    const pts = m.path.map(p => T(p));
+    ctx.strokeStyle = "#39414e"; ctx.lineWidth = 2;
+    ctx.beginPath();
+    pts.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]));
+    ctx.stroke();
+    const [tx, ty] = T(m.tag_pos);
+    ctx.fillStyle = m.is_open ? "#9dff00" : "#566073";
+    ctx.beginPath(); ctx.arc(tx, ty, 4, 0, 7); ctx.fill();
+    ctx.fillStyle = "#7d8696"; ctx.font = "10px system-ui";
+    ctx.fillText(`${m.name} ${m.is_open ? "OPEN" : "closed"}`, tx + 7, ty + 4);
   }
 
   if (on("spots")) for (const s of (d.spots || [])) {
@@ -486,6 +500,15 @@ function update3D(d) {
     group.add(s);
   }
 
+  if (on("movables")) for (const m of (d.movables || [])) {
+    group.add(line3(THREE, m.path, 0x39414e, 0.9));
+    const dot = new THREE.Mesh(
+      new THREE.SphereGeometry(0.05, 12, 8),
+      new THREE.MeshBasicMaterial({ color: m.is_open ? 0x9dff00 : 0x566073 }));
+    dot.position.set(...m.tag_pos);
+    group.add(dot);
+  }
+
   if (on("spots")) for (const s of (d.spots || [])) {
     const oct = new THREE.Mesh(
       new THREE.OctahedronGeometry(0.06),
@@ -547,9 +570,10 @@ function renderPanel(items, events) {
   for (const it of items) {
     const row = document.createElement("div");
     row.className = "item-row";
+    const place = it.maybe_in ? `likely in ${it.maybe_in}` : (it.spot || it.zone || "unzoned");
     const where = it.status === "never_seen"
       ? '<span class="never">never seen</span>'
-      : `<span class="zone-name">${it.spot || it.zone || "unzoned"}</span>` +
+      : `<span class="zone-name">${place}</span>` +
         ` ±${it.sigma_m}m <span class="${it.status === "stale" ? "stale" : ""}">${it.age_s}s</span>`;
     row.innerHTML = `<span>${it.name}</span><span>${where}</span>`;
     list.append(row);
@@ -559,7 +583,9 @@ function renderPanel(items, events) {
   for (const e of [...events].reverse()) {
     const div = document.createElement("div");
     div.className = "ev";
-    div.textContent = `${e.item_id}: ${e.from_spot || e.from_zone || "?"} → ${e.to_spot || e.to_zone || "?"}`;
+    div.textContent = e.event
+      ? `${e.movable}: ${e.event}`
+      : `${e.item_id}: ${e.from_spot || e.from_zone || "?"} → ${e.to_spot || e.to_zone || "?"}`;
     ev.append(div);
   }
 }

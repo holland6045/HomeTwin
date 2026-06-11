@@ -117,6 +117,9 @@ def map_overlay(tracker) -> dict:
         "trails": trails,
         "anchors": anchors,
         "spots": spots,
+        "movables": (
+            tracker.cfg.movables.snapshot() if getattr(tracker.cfg, "movables", None) else []
+        ),
         "heatmaps": heatmaps,
         "cameras": cameras,
         "presence": tracker.presence,

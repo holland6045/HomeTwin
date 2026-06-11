@@ -97,6 +97,22 @@ With `tag_positions` set, one visible end calibrates exactly; without it,
 prefer single-marker tags for anchors or accept the documented bias
 (`tests/test_anchors.py` demonstrates both behaviors).
 
+**Better still: distinct L/R codes.** `make-tag --layout wide --id 14
+--twin-id 15` prints a different marker at each end. Each end is then an
+ordinary single-position anchor — no hypothesis matching at all, exact
+correspondence by ID, and when both ends are visible the camera gets two
+independent, well-separated residuals per frame (better averaging and a
+clean translation-drift signal, since rotation moves both residuals
+together while translation splits them). Same occlusion resistance as
+same-ID twin. Use same-ID twin only when you want one config line per
+strip; use L/R for anchors:
+
+```yaml
+anchors:
+  - {tag: "aruco:14", position: [4.0, 1.93, 0.9]}   # left end
+  - {tag: "aruco:15", position: [4.0, 2.07, 0.9]}   # right end
+```
+
 ## Shared reference across trackers
 
 Two cameras watching the same block correct against the same physical

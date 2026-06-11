@@ -30,6 +30,7 @@ class AppConfig:
     state_path: str | None = None
     save_interval_s: float = 30.0
     anchors: dict = field(default_factory=dict)  # fiducial tag -> world position
+    movables: object = None  # MovableRegistry (doors/drawers) or None
     splat_asset: str | None = None  # .splat/.ply scan rendered by the dashboard's 3D tab
     splat_transform: dict | None = None  # aligns the scan to the world frame
     raw: dict = field(default_factory=dict)
@@ -85,9 +86,26 @@ def load_config(path: str | Path) -> AppConfig:
     for spot in world.spots:
         if spot.tag and str(spot.tag) not in anchors:
             anchors[str(spot.tag)] = [tuple(p) for p in (spot.tag_positions or [spot.position])]
+
+    movables = None
+    if raw.get("world", {}).get("movables"):
+        from apartment_tracker.movables import MovableRegistry
+
+        movables = MovableRegistry.from_config(world_cfg["movables"])
+        for tag in movables.by_tag:
+            if anchors.pop(tag, None) is not None:
+                # a moving surface is never a calibration reference
+                import logging
+
+                logging.getLogger("apartment_tracker").warning(
+                    "tag %s is on a movable; removed from anchors", tag
+                )
+
     for sensor in sensors:
         if anchors and hasattr(sensor, "attach_anchors"):
             sensor.attach_anchors(anchors)
+        if movables is not None and hasattr(sensor, "attach_movables"):
+            sensor.attach_movables(movables)
 
     tracker = raw.get("tracker", {})
     api = raw.get("api", {})
@@ -104,6 +122,7 @@ def load_config(path: str | Path) -> AppConfig:
         state_path=tracker.get("state_path"),
         save_interval_s=float(tracker.get("save_interval_s", 30.0)),
         anchors=anchors,
+        movables=movables,
         splat_asset=raw.get("world", {}).get("splat_asset"),
         splat_transform=raw.get("world", {}).get("splat_transform"),
         raw=raw,

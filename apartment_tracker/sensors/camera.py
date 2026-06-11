@@ -135,6 +135,11 @@ class CameraSensor(SensorAdapter):
         self.bearing_sigma_rad = bearing_sigma_rad
         self.anchor_correct = anchor_correct
         self.calibrator = None
+        self.movables = None
+
+    def attach_movables(self, registry) -> None:
+        """Share the tracker-wide movable registry (doors/drawers)."""
+        self.movables = registry
 
     def attach_anchors(self, anchors: dict[str, tuple[float, float, float]]) -> None:
         """Give this camera the world's calibration anchors (optional)."""
@@ -201,6 +206,10 @@ class CameraSensor(SensorAdapter):
         ts = self.clock()
         out = []
         for det in self.detector.detect(frame):
+            if self.movables and det.tag_id and self.movables.observe_ray(
+                det.tag_id, self.geometry.position, self.geometry.ray(*det.center), ts
+            ):
+                continue  # door/drawer state tag, not a tracked item
             if (
                 self.calibrator
                 and det.tag_id
