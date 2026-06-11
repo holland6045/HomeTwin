@@ -115,7 +115,13 @@ def make_handler(tracker: Tracker, policy: AuthPolicy):
                 self.wfile.write(body)
                 return
             if parts == ["health"]:
-                self._send(200, {"status": "ok", "sensors": len(tracker.sensors)})
+                from hometwin.accel import capabilities
+
+                self._send(200, {
+                    "status": "ok",
+                    "sensors": len(tracker.sensors),
+                    "accel": capabilities(),
+                })
                 return
             if not self._authorize(write=False):
                 return

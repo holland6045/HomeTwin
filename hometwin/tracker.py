@@ -13,6 +13,7 @@ import math
 import threading
 import time
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 
 from hometwin.config import AppConfig
 from hometwin.fusion import FusionEngine
@@ -49,6 +50,14 @@ class Tracker:
         self._stop = threading.Event()
         # RLock: overlay/snapshot helpers nest under step()'s critical section
         self._lock = threading.RLock()
+        self._pool: ThreadPoolExecutor | None = None
+        if getattr(cfg, "parallel_polling", True) and len(cfg.sensors) > 1:
+            from hometwin.accel import poll_workers
+
+            self._pool = ThreadPoolExecutor(
+                max_workers=poll_workers(len(cfg.sensors)),
+                thread_name_prefix="hometwin-poll",
+            )
         self.store = StateStore(cfg.state_path) if cfg.state_path else None
         if self.store:
             restored = self.engine.restore_state(self.store.load())
@@ -78,16 +87,33 @@ class Tracker:
             except Exception:
                 log.exception("sensor %s failed to stop", s.sensor_id)
 
+    def _poll_all(self) -> list[tuple]:
+        """Poll every sensor, in parallel when a pool exists. Polling is
+        I/O + C-extension bound (sockets, cv2, onnxruntime — all release
+        the GIL), so cameras stop serializing behind each other. Fusion
+        stays single-threaded: batches come back in sensor order."""
+        if self._pool is None:
+            results = []
+            for sensor in self.sensors:
+                try:
+                    results.append((sensor, sensor.poll()))
+                except Exception:
+                    log.exception("sensor %s poll failed", sensor.sensor_id)
+            return results
+        futures = [(s, self._pool.submit(s.poll)) for s in self.sensors]
+        results = []
+        for sensor, fut in futures:
+            try:
+                results.append((sensor, fut.result(timeout=10.0)))
+            except Exception:
+                log.exception("sensor %s poll failed", sensor.sensor_id)
+        return results
+
     def step(self) -> int:
         """Poll all sensors once and fuse. Returns observations processed."""
         count = 0
         touched: set[str] = set()
-        for sensor in self.sensors:
-            try:
-                batch = sensor.poll()
-            except Exception:
-                log.exception("sensor %s poll failed", sensor.sensor_id)
-                continue
+        for sensor, batch in self._poll_all():
             for obs in batch:
                 count += 1
                 # remote cameras report movable tags as bearings: route to
@@ -213,6 +239,8 @@ class Tracker:
         finally:
             self.save_state()
             self.stop_sensors()
+            if self._pool is not None:
+                self._pool.shutdown(wait=False)
 
     def shutdown(self) -> None:
         self._stop.set()

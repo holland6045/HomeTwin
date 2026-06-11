@@ -29,6 +29,7 @@ class AppConfig:
     dataset_dir: str = "dataset"
     state_path: str | None = None
     save_interval_s: float = 30.0
+    parallel_polling: bool = True
     anchors: dict = field(default_factory=dict)  # fiducial tag -> world position
     movables: object = None  # MovableRegistry (doors/drawers) or None
     device_tags: object = None  # DeviceTagSolver (tags on sensors) or None
@@ -137,6 +138,7 @@ def load_config(path: str | Path) -> AppConfig:
         dataset_dir=tracker.get("dataset_dir", "dataset"),
         state_path=tracker.get("state_path"),
         save_interval_s=float(tracker.get("save_interval_s", 30.0)),
+        parallel_polling=bool(tracker.get("parallel_polling", True)),
         anchors=anchors,
         movables=movables,
         device_tags=device_tags,

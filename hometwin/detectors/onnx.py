@@ -33,8 +33,11 @@ class OnnxDetector(Detector):
                 "detector 'onnx' requires onnxruntime+numpy: "
                 "pip install hometwin[ml]"
             ) from e
+        from hometwin.accel import onnx_providers
+
         self._np = np
-        self.session = ort.InferenceSession(model_path, providers=["CPUExecutionProvider"])
+        # CUDA/TensorRT/CoreML automatically when the runtime offers them
+        self.session = ort.InferenceSession(model_path, providers=onnx_providers())
         self.input_name = self.session.get_inputs()[0].name
         self.labels = labels or []
         self.input_size = input_size

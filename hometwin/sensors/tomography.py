@@ -45,21 +45,27 @@ class RTIGrid:
         self.lam = lambda_m
         self.nx = max(int(round((self.xmax - self.xmin) / cell_m)), 1)
         self.ny = max(int(round((self.ymax - self.ymin) / cell_m)), 1)
+        # link geometry is static: the ellipse membership of every cell is
+        # computed once per link and cached as flat indices, turning each
+        # reconstruction from O(links*cells) trig into indexed adds
+        self._link_cells: dict[tuple[str, str], list[int]] = {}
+        try:
+            import numpy as np
 
-    def cell_center(self, ix: int, iy: int) -> tuple[float, float]:
-        return (self.xmin + (ix + 0.5) * self.cell, self.ymin + (iy + 0.5) * self.cell)
+            self._np = np
+        except ImportError:
+            self._np = None
 
-    def reconstruct(self, attenuations: dict[tuple[str, str], float]) -> list[list[float]]:
-        img = [[0.0] * self.nx for _ in range(self.ny)]
-        for (a, b), atten in attenuations.items():
-            if atten <= 0 or a not in self.nodes or b not in self.nodes:
-                continue
-            ax, ay = self.nodes[a]
-            bx, by = self.nodes[b]
-            link_len = math.hypot(bx - ax, by - ay)
-            if link_len < 1e-6:
-                continue
-            w = atten / math.sqrt(link_len)
+    def _cells_for_link(self, a: str, b: str) -> list[int]:
+        key = (a, b)
+        cached = self._link_cells.get(key)
+        if cached is not None:
+            return cached
+        ax, ay = self.nodes[a]
+        bx, by = self.nodes[b]
+        link_len = math.hypot(bx - ax, by - ay)
+        cells = []
+        if link_len >= 1e-6:
             for iy in range(self.ny):
                 for ix in range(self.nx):
                     px, py = self.cell_center(ix, iy)
@@ -69,8 +75,36 @@ class RTIGrid:
                         - link_len
                     )
                     if excess < self.lam:
-                        img[iy][ix] += w
-        return img
+                        cells.append(iy * self.nx + ix)
+        if self._np is not None:
+            cells = self._np.array(cells, dtype=self._np.intp)
+        self._link_cells[key] = cells
+        return cells
+
+    def cell_center(self, ix: int, iy: int) -> tuple[float, float]:
+        return (self.xmin + (ix + 0.5) * self.cell, self.ymin + (iy + 0.5) * self.cell)
+
+    def reconstruct(self, attenuations: dict[tuple[str, str], float]) -> list[list[float]]:
+        np = self._np
+        flat = np.zeros(self.ny * self.nx) if np is not None else [0.0] * (self.ny * self.nx)
+        for (a, b), atten in attenuations.items():
+            if atten <= 0 or a not in self.nodes or b not in self.nodes:
+                continue
+            ax, ay = self.nodes[a]
+            bx, by = self.nodes[b]
+            link_len = math.hypot(bx - ax, by - ay)
+            if link_len < 1e-6:
+                continue
+            w = atten / math.sqrt(link_len)
+            cells = self._cells_for_link(a, b)
+            if np is not None:
+                np.add.at(flat, cells, w)
+            else:
+                for idx in cells:
+                    flat[idx] += w
+        if np is not None:
+            return flat.reshape(self.ny, self.nx).tolist()
+        return [flat[iy * self.nx:(iy + 1) * self.nx] for iy in range(self.ny)]
 
     def blob(
         self, img: list[list[float]], threshold_frac: float = 0.6
