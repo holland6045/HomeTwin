@@ -49,7 +49,21 @@ from hometwin.sensors.base import SensorAdapter
 from hometwin.sensors.ble import PathLossModel
 
 
-def parse_message(msg: dict, default_sensor: str, model: PathLossModel) -> Observation | None:
+class RemoteScanner:
+    """Per-remote-node ranging state: each MCU scanner gets its own
+    learnable path-loss model and raw-RSSI retention, so the online
+    calibration loop covers bridge-fed nodes, not just local scanners."""
+
+    def __init__(self, sensor_id: str, model: PathLossModel):
+        self.sensor_id = sensor_id
+        self.model = PathLossModel(model.tx_power, model.exponent)
+        self.position: tuple | None = None  # latest reported anchor
+        self.last_rssi: dict[str, tuple[float, float]] = {}
+
+
+def parse_message(
+    msg: dict, default_sensor: str, model: PathLossModel, remote_scanner=None
+) -> Observation | None:
     kind = msg.get("type")
     sensor_id = msg.get("sensor_id", default_sensor)
     ts = time.time()
@@ -72,10 +86,17 @@ def parse_message(msg: dict, default_sensor: str, model: PathLossModel) -> Obser
             sigma_m=float(msg.get("sigma_m", 1.0)),
         )
     if kind == "rssi":
-        d = model.rssi_to_range(float(msg["rssi"]))
+        scanner = remote_scanner(msg, default_sensor, model) if remote_scanner else None
+        use = scanner.model if scanner else model
+        rssi = float(msg["rssi"])
+        anchor = tuple(msg["anchor"])
+        if scanner is not None:
+            scanner.position = anchor
+            scanner.last_rssi[msg["mac"].upper()] = (rssi, ts)
+        d = use.rssi_to_range(rssi)
         common["item_id"] = common["item_id"] or f"ble:{msg['mac'].upper()}"
         return RangeObservation(
-            **common, anchor=tuple(msg["anchor"]), range_m=d, sigma_m=model.range_sigma(d)
+            **common, anchor=anchor, range_m=d, sigma_m=use.range_sigma(d)
         )
     if kind == "bearing":
         d = msg["direction"]
@@ -112,6 +133,7 @@ class NetworkBridgeSensor(SensorAdapter):
         self.model = PathLossModel(tx_power, exponent)
         self.auth_token = auth_token
         self._queue: deque[Observation] = deque(maxlen=max_queue)
+        self.remote_scanners: dict[str, RemoteScanner] = {}
         self._lock = threading.Lock()
         self._server: socketserver.ThreadingTCPServer | None = None
         self._thread: threading.Thread | None = None
@@ -127,9 +149,18 @@ class NetworkBridgeSensor(SensorAdapter):
             self.auth_token, presented
         )
 
+    def _remote_scanner(self, msg: dict, default_sensor: str, model) -> RemoteScanner:
+        sid = msg.get("sensor_id", default_sensor)
+        scanner = self.remote_scanners.get(sid)
+        if scanner is None:
+            scanner = self.remote_scanners[sid] = RemoteScanner(sid, model)
+        return scanner
+
     def handle_line(self, line: str) -> None:
         try:
-            obs = parse_message(json.loads(line), self.sensor_id, self.model)
+            obs = parse_message(
+                json.loads(line), self.sensor_id, self.model, self._remote_scanner
+            )
         except (ValueError, KeyError, TypeError):
             self.dropped += 1
             return

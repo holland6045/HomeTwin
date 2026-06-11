@@ -47,7 +47,8 @@ class Tracker:
         self.trails: dict[str, deque] = {}  # item -> recent path points
         self._zones: dict[str, str | None] = {}
         self._stop = threading.Event()
-        self._lock = threading.Lock()
+        # RLock: overlay/snapshot helpers nest under step()'s critical section
+        self._lock = threading.RLock()
         self.store = StateStore(cfg.state_path) if cfg.state_path else None
         if self.store:
             restored = self.engine.restore_state(self.store.load())
@@ -149,7 +150,7 @@ class Tracker:
         if not cameras:
             return
         candidates = []
-        with self._lock:
+        with self._lock:  # noqa: SIM117 — single guarded read of track state
             for item in self.cfg.items.all():
                 track = self.engine.tracks.get(item.item_id)
                 if track is None or track.sigma_m > SOFT_REF_MAX_SIGMA_M:
@@ -172,6 +173,7 @@ class Tracker:
             cam.update_soft_references(refs)
 
     def _record_zone_changes(self, item_ids: set[str]) -> None:
+      with self._lock:
         for item_id in item_ids:
             track = self.engine.tracks.get(item_id)
             if track is None:
@@ -218,8 +220,31 @@ class Tracker:
     def snapshot(self) -> list[dict]:
         with self._lock:
             snap = self.engine.snapshot()
-        self._annotate_stowed(snap)
+            self._annotate_stowed(snap)
         return snap
+
+    def overlay_state(self) -> dict:
+        """Consistent copies of everything the overlay renders. API threads
+        must never iterate live tracker-thread structures (dict/deque resize
+        during iteration raises) — they get this snapshot instead."""
+        with self._lock:
+            snap = self.engine.snapshot()
+            self._annotate_stowed(snap)
+            return {
+                "items": snap,
+                "trails": {
+                    item_id: [list(p["pos"]) for p in list(trail)[-100:]]
+                    for item_id, trail in self.trails.items()
+                    if len(trail) >= 2
+                },
+                "ranges": dict(self.last_ranges),
+                "bearings": dict(self.last_bearings),
+                "events": list(self.events)[-20:],
+                "sensor_trust": {
+                    sid: round(self.engine.trust(sid), 2)
+                    for sid in list(self.engine.sensor_nis)
+                },
+            }
 
     def _annotate_stowed(self, snap: list[dict]) -> None:
         """Infer "item is probably inside that drawer": last seen near the

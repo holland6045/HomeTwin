@@ -122,16 +122,19 @@ def make_handler(tracker: Tracker, policy: AuthPolicy):
             if parts == ["assets", "splat"]:
                 path = getattr(tracker.cfg, "splat_asset", None)
                 try:
-                    with open(path, "rb") as f:
-                        body = f.read()
+                    f = open(path, "rb")
                 except (TypeError, OSError):
                     self._send(404, {"error": "no splat asset configured"})
                     return
-                self.send_response(200)
-                self.send_header("Content-Type", "application/octet-stream")
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
+                with f:
+                    size = os.fstat(f.fileno()).st_size
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/octet-stream")
+                    self.send_header("Content-Length", str(size))
+                    self.end_headers()
+                    # scans run to hundreds of MB: stream, never buffer
+                    while chunk := f.read(UPLOAD_CHUNK):
+                        self.wfile.write(chunk)
             elif parts == ["overlay", "map"]:
                 self._send(200, map_overlay(tracker))
             elif len(parts) == 3 and parts[:2] == ["overlay", "camera"]:

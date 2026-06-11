@@ -570,12 +570,23 @@ function renderPanel(items, events) {
   for (const it of items) {
     const row = document.createElement("div");
     row.className = "item-row";
-    const place = it.maybe_in ? `likely in ${it.maybe_in}` : (it.spot || it.zone || "unzoned");
-    const where = it.status === "never_seen"
-      ? '<span class="never">never seen</span>'
-      : `<span class="zone-name">${place}</span>` +
-        ` ±${it.sigma_m}m <span class="${it.status === "stale" ? "stale" : ""}">${it.age_s}s</span>`;
-    row.innerHTML = `<span>${it.name}</span><span>${where}</span>`;
+    const name = document.createElement("span");
+    name.textContent = it.name;
+    const where = document.createElement("span");
+    if (it.status === "never_seen") {
+      const n = document.createElement("span");
+      n.className = "never"; n.textContent = "never seen";
+      where.append(n);
+    } else {
+      const place = document.createElement("span");
+      place.className = "zone-name";
+      place.textContent = it.maybe_in ? `likely in ${it.maybe_in}` : (it.spot || it.zone || "unzoned");
+      const age = document.createElement("span");
+      age.className = it.status === "stale" ? "stale" : "";
+      age.textContent = `${it.age_s}s`;
+      where.append(place, ` ±${it.sigma_m}m `, age);
+    }
+    row.append(name, where);
     list.append(row);
   }
   const ev = document.getElementById("event-list");

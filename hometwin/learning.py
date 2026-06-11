@@ -91,20 +91,27 @@ def collect_ble_samples(tracker) -> None:
     if learners is None:
         learners = tracker._path_loss_learners = {}
     now_tracks = tracker.engine.tracks
+    scanners = []
     for sensor in tracker.sensors:
-        last_rssi = getattr(sensor, "last_rssi", None)
-        if last_rssi is None or not hasattr(sensor, "model"):
+        if getattr(sensor, "last_rssi", None) is not None and hasattr(sensor, "model"):
+            scanners.append(sensor)
+        # bridge-fed MCU scanners learn too, each with its own model
+        scanners.extend(getattr(sensor, "remote_scanners", {}).values())
+    for scanner in scanners:
+        if scanner.position is None:
             continue
-        learner = learners.get(sensor.sensor_id)
+        learner = learners.get(scanner.sensor_id)
         if learner is None:
-            learner = learners[sensor.sensor_id] = PathLossLearner(sensor)
-        for mac, (rssi, ts) in list(last_rssi.items()):
+            learner = learners[scanner.sensor_id] = PathLossLearner(scanner)
+        for mac in list(scanner.last_rssi):
             item_id = tracker.cfg.items.resolve_tag(f"ble:{mac.upper()}")
             track = now_tracks.get(item_id) if item_id else None
             if track is None or track.sigma_m > MAX_TRACK_SIGMA_M:
                 continue
+            sample = scanner.last_rssi.pop(mac, None)  # atomic: handler threads write
+            if sample is None:
+                continue
+            rssi, ts = sample
             if ts - track.last_strong_update > FRESH_FIX_S:
                 continue  # position not currently camera/bearing-confirmed
-            dist = math.dist(track.position, sensor.position)
-            learner.add_sample(dist, rssi)
-            del last_rssi[mac]  # one sample per reading
+            learner.add_sample(math.dist(track.position, scanner.position), rssi)

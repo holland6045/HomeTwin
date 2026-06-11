@@ -57,8 +57,9 @@ def map_overlay(tracker) -> dict:
             heatmaps.append(layer)
         elif layer["kind"] == "camera":
             cameras.append(layer)
+    st = tracker.overlay_state()  # locked copies: never iterate live structures
     rings = []
-    for (sensor_id, item_id), r in tracker.last_ranges.items():
+    for (sensor_id, item_id), r in st["ranges"].items():
         ring = floor_ring(r["anchor"], r["range_m"])
         if ring:
             rings.append(
@@ -71,10 +72,10 @@ def map_overlay(tracker) -> dict:
                     "anchor": list(r["anchor"]),
                 }
             )
-    items = tracker.snapshot()
+    items = st["items"]
     positions = {e["item_id"]: e.get("position") for e in items}
     bearings = []
-    for (sensor_id, item_id), b in tracker.last_bearings.items():
+    for (sensor_id, item_id), b in st["bearings"].items():
         pos = positions.get(item_id)
         length = (
             math.dist(b["origin"], pos) * 1.15 if pos else 6.0
@@ -90,12 +91,8 @@ def map_overlay(tracker) -> dict:
             }
         )
     trails = [
-        {
-            "item_id": item_id,
-            "points": [p["pos"] for p in list(trail)[-100:]],
-        }
-        for item_id, trail in tracker.trails.items()
-        if len(trail) >= 2
+        {"item_id": item_id, "points": points}
+        for item_id, points in st["trails"].items()
     ]
     anchors = [
         {"tag": tag, "position": list(pos)}
@@ -127,15 +124,12 @@ def map_overlay(tracker) -> dict:
         ),
         "learning": {
             "path_loss": tracker.learning_status() if hasattr(tracker, "learning_status") else [],
-            "sensor_trust": {
-                sid: round(tracker.engine.trust(sid), 2)
-                for sid in tracker.engine.sensor_nis
-            },
+            "sensor_trust": st["sensor_trust"],
         },
         "heatmaps": heatmaps,
         "cameras": cameras,
         "presence": tracker.presence,
-        "events": list(tracker.events)[-20:],
+        "events": st["events"],
         "splat": bool(getattr(tracker.cfg, "splat_asset", None)),
         "splat_transform": getattr(tracker.cfg, "splat_transform", None),
         "splat_version": _splat_version(getattr(tracker.cfg, "splat_asset", None)),
@@ -172,8 +166,9 @@ def camera_overlay(tracker, sensor_id: str) -> dict | None:
     geo = camera.geometry
     now = time.time()
 
+    st = tracker.overlay_state()
     items = []
-    for entry in tracker.snapshot():
+    for entry in st["items"]:
         pos = entry.get("position")
         if pos is None:
             continue
@@ -222,7 +217,7 @@ def camera_overlay(tracker, sensor_id: str) -> dict | None:
                 )
 
     rings = []
-    for (rs_id, item_id), r in tracker.last_ranges.items():
+    for (rs_id, item_id), r in st["ranges"].items():
         ring = floor_ring(r["anchor"], r["range_m"])
         if ring is None:
             continue
@@ -245,11 +240,8 @@ def camera_overlay(tracker, sensor_id: str) -> dict | None:
             zones.append({"name": zone.name, "points": seg})
 
     trails = []
-    for item_id, trail in tracker.trails.items():
-        if len(trail) < 2:
-            continue
-        points = [tuple(p["pos"]) for p in list(trail)[-100:]]
-        for seg in _project_polyline(geo, points):
+    for item_id, points in st["trails"].items():
+        for seg in _project_polyline(geo, [tuple(p) for p in points]):
             trails.append({"item_id": item_id, "points": seg})
 
     presence = None
