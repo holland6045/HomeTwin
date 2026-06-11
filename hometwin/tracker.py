@@ -47,6 +47,7 @@ class Tracker:
         self.last_bearings: dict[tuple[str, str], dict] = {}  # (sensor, item) -> last ray
         self.trails: dict[str, deque] = {}  # item -> recent path points
         self._zones: dict[str, str | None] = {}
+        self._wm_movable_seen: dict[str, tuple] = {}
         self._stop = threading.Event()
         # RLock: overlay/snapshot helpers nest under step()'s critical section
         self._lock = threading.RLock()
@@ -58,6 +59,12 @@ class Tracker:
                 max_workers=poll_workers(len(cfg.sensors)),
                 thread_name_prefix="hometwin-poll",
             )
+        from hometwin.worldmodel import WorldModel
+
+        self._wm_path = f"{cfg.state_path}.worldmodel.gz" if cfg.state_path else None
+        self.worldmodel = (
+            WorldModel.load(self._wm_path) if self._wm_path else WorldModel()
+        )
         self.store = StateStore(cfg.state_path) if cfg.state_path else None
         if self.store:
             restored = self.engine.restore_state(self.store.load())
@@ -75,6 +82,11 @@ class Tracker:
             with self._lock:
                 state = self.engine.dump_state()
             self.store.save(state)
+        if self._wm_path:
+            self.worldmodel.decay_and_compact(
+                self.worldmodel.maintenance_now(time.time())
+            )
+            self.worldmodel.save(self._wm_path)
 
     def start_sensors(self) -> None:
         for s in self.sensors:
@@ -145,6 +157,7 @@ class Tracker:
                             "timestamp": obs.timestamp,
                         }
                 elif isinstance(obs, AreaObservation):
+                    self.worldmodel.add_point(obs.centroid, obs.timestamp, weight=0.3)
                     self.presence = {
                         "sensor_id": obs.sensor_id,
                         "centroid": list(obs.centroid),
@@ -154,6 +167,13 @@ class Tracker:
                     }
         self._record_zone_changes(touched)
         if self.cfg.movables is not None:
+            for m in self.cfg.movables.movables:
+                st = self.cfg.movables.states[m.name]
+                if st.last_seen and st.last_seen not in self._wm_movable_seen.get(m.name, ()):
+                    self.worldmodel.add_point(
+                        m.position_at(st.openness), st.last_seen, weight=0.5
+                    )
+                    self._wm_movable_seen[m.name] = (st.last_seen,)
             self.events.extend(self.cfg.movables.drain_events())
         self._push_soft_references()
         from hometwin.learning import collect_ble_samples
@@ -208,6 +228,11 @@ class Tracker:
             pos = track.position
             if not trail or math.dist(trail[-1]["pos"], pos) >= TRAIL_MIN_STEP_M:
                 trail.append({"t": track.last_update, "pos": list(pos)})
+            # the passive world model sketches space from positions the
+            # system already trusts; weight by track confidence
+            self.worldmodel.add_point(
+                pos, track.last_update, weight=1.0 / (1.0 + track.sigma_m)
+            )
             zone = self.cfg.world.locate(track.position)
             spot = self.cfg.world.locate_spot(track.position)
             prev = self._zones.get(item_id)

@@ -155,6 +155,12 @@ def make_handler(tracker: Tracker, policy: AuthPolicy):
                     # scans run to hundreds of MB: stream, never buffer
                     while chunk := f.read(UPLOAD_CHUNK):
                         self.wfile.write(chunk)
+            elif parts == ["pointcloud"]:
+                wm = tracker.worldmodel
+                self._send(200, {
+                    **wm.stats(),
+                    "points": wm.point_cloud(),
+                })
             elif parts == ["overlay", "map"]:
                 self._send(200, map_overlay(tracker))
             elif len(parts) == 3 and parts[:2] == ["overlay", "camera"]:

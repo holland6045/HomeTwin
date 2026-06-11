@@ -144,6 +144,11 @@ rendering is client-side canvas, so the core stays dependency-free. Any
 sensor can publish a drawable layer by implementing `overlay()` — the UI
 picks it up without changes.
 
+**World model (passive):** the twin sketches its own space — trusted
+position fixes deposit into a decaying voxel grid (floaters compacted
+away, memory bounded), rendered as a lidar-style height-colored point
+cloud in the 3D tab and at `GET /pointcloud`. `docs/world-model.md`.
+
 **Path traces:** the tracker keeps a bounded motion trail per item
 (new point on every ≥0.15 m move); trails render in all three views with
 per-item colors and age fading.

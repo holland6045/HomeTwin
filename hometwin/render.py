@@ -238,3 +238,53 @@ def dashboard_svg(d: dict) -> str:
         y += 22
     el.append("</svg>")
     return "\n".join(el)
+
+
+def _height_color(z: float, zmin: float, zmax: float) -> str:
+    """Waymo-ish height ramp: deep blue floor -> cyan -> green -> amber -> magenta."""
+    t = 0.0 if zmax <= zmin else max(0.0, min(1.0, (z - zmin) / (zmax - zmin)))
+    stops = [(36, 99, 235), (34, 211, 238), (74, 222, 128), (250, 204, 21), (236, 72, 153)]
+    f = t * (len(stops) - 1)
+    i = min(int(f), len(stops) - 2)
+    u = f - i
+    r, g, b = (round(a + (b2 - a) * u) for a, b2 in zip(stops[i], stops[i + 1]))
+    return f"rgb({r},{g},{b})"
+
+
+def pointcloud_svg(points: list[list[float]], voxel_m: float = 0.12) -> str:
+    """Oblique-projected scatter of the passive world model on dark ground —
+    the apartment as a lidar-style point cloud."""
+    DW, DH = 1000.0, 700.0
+    if not points:
+        return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {DW:.0f} {DH:.0f}">'
+                f'<rect width="{DW:.0f}" height="{DH:.0f}" fill="#0a0c10"/>'
+                '<text x="40" y="60" fill="#566073" font-size="16" '
+                'font-family="system-ui">world model is still empty — let it watch</text></svg>')
+    # oblique projection: x' = x + 0.45y, y' = -(z + 0.30y)
+    proj = [(p[0] + 0.45 * p[1], -(p[2] + 0.30 * p[1]), p[2], p[3]) for p in points]
+    xs = [p[0] for p in proj]
+    ys = [p[1] for p in proj]
+    zmin = min(p[2] for p in proj)
+    zmax = max(p[2] for p in proj)
+    pad = 50.0
+    sx = (DW - 2 * pad) / max(max(xs) - min(xs), 1e-6)
+    sy = (DH - 2 * pad) / max(max(ys) - min(ys), 1e-6)
+    s = min(sx, sy)
+    wmax = max(p[3] for p in proj)
+    el = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {DW:.0f} {DH:.0f}">',
+        f'<rect width="{DW:.0f}" height="{DH:.0f}" fill="#0a0c10"/>',
+    ]
+    r = max(s * voxel_m * 0.45, 1.2)
+    # draw floor-up so high points overlay low ones, like a lidar sweep
+    for px, py, z, w in sorted(proj, key=lambda p: p[2]):
+        cx = pad + (px - min(xs)) * s
+        cy = pad + (py - min(ys)) * s
+        alpha = 0.25 + 0.75 * min(w / wmax, 1.0)
+        el.append(f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="{r:.1f}" '
+                  f'fill="{_height_color(z, zmin, zmax)}" fill-opacity="{alpha:.2f}"/>')
+    el.append('<text x="20" y="28" fill="#566073" font-size="13" '
+              'font-family="ui-monospace, monospace">HOMETWIN // WORLD MODEL '
+              f'· {len(points)} voxels</text>')
+    el.append("</svg>")
+    return "\n".join(el)

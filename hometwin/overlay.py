@@ -147,6 +147,7 @@ def map_overlay(tracker) -> dict:
         "presence": tracker.presence,
         "events": st["events"],
         "floorplan": _floorplan_meta_cached(tracker),
+        "worldmodel": tracker.worldmodel.stats() if hasattr(tracker, "worldmodel") else None,
         "splat": bool(getattr(tracker.cfg, "splat_asset", None)),
         "splat_transform": getattr(tracker.cfg, "splat_transform", None),
         "splat_version": _splat_version(getattr(tracker.cfg, "splat_asset", None)),

@@ -60,6 +60,7 @@ const LAYERS = [
   ["anchors", "Anchors", true],
   ["spots", "Spots", true],
   ["movables", "Doors/drawers", true],
+  ["worldmodel", "World model", true],
   ["items", "Items", true],
   ["presence", "Presence", true],
 ];
@@ -449,6 +450,24 @@ function line3(THREE, points, color, opacity = 1, dashed = false) {
   return line;
 }
 
+let cloudPoints = null, cloudFetched = 0;
+async function ensurePointCloud() {
+  if (Date.now() - cloudFetched < 30000) return;  // refresh every 30 s
+  cloudFetched = Date.now();
+  try {
+    const d = await (await authFetch("/pointcloud")).json();
+    cloudPoints = d.points || [];
+    if (state.view === "3d" && splat3d && state.data) update3D(state.data);
+  } catch (e) { /* tracker restarting */ }
+}
+
+function heightColor(z, zmin, zmax) {
+  const t = zmax <= zmin ? 0 : Math.max(0, Math.min(1, (z - zmin) / (zmax - zmin)));
+  const stops = [[36,99,235],[34,211,238],[74,222,128],[250,204,21],[236,72,153]];
+  const f = t * (stops.length - 1), i = Math.min(Math.floor(f), stops.length - 2), u = f - i;
+  return stops[i].map((a, k) => (a + (stops[i+1][k] - a) * u) / 255);
+}
+
 function update3D(d) {
   if (!splat3d) return;
   const { THREE, group } = splat3d;
@@ -517,6 +536,24 @@ function update3D(d) {
       new THREE.MeshBasicMaterial({ color: 0x8a7dff, transparent: true, opacity: 0.18 }));
     s.position.set(...d.presence.centroid);
     group.add(s);
+  }
+
+  if (on("worldmodel") && cloudPoints && cloudPoints.length) {
+    // the apartment as a lidar-style cloud: height-ramped colors
+    const zs = cloudPoints.map(p => p[2]);
+    const zmin = Math.min(...zs), zmax = Math.max(...zs);
+    const pos = new Float32Array(cloudPoints.length * 3);
+    const col = new Float32Array(cloudPoints.length * 3);
+    cloudPoints.forEach((p, i) => {
+      pos.set([p[0], p[1], p[2]], i * 3);
+      col.set(heightColor(p[2], zmin, zmax), i * 3);
+    });
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    group.add(new THREE.Points(geo, new THREE.PointsMaterial({
+      size: 0.06, vertexColors: true, transparent: true, opacity: 0.8,
+      sizeAttenuation: true })));
   }
 
   if (on("movables")) for (const m of (d.movables || [])) {
@@ -652,7 +689,7 @@ async function tick() {
         }
       }
       renderPanel(d.items, d.events);
-      if (want3d) { if (splat3d) update3D(d); return; }
+      if (want3d) { ensurePointCloud(); if (splat3d) update3D(d); return; }
       stream.style.display = "none";
     } else {
       if (d.stream_url) { stream.src = d.stream_url; stream.style.display = "block"; }
