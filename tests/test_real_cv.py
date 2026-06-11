@@ -21,7 +21,7 @@ W, H = 1280, 960
 
 
 def frame_with_marker(marker_id, center_px, size_px=160):
-    dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
+    dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_250)
     marker = cv2.aruco.generateImageMarker(dictionary, marker_id, size_px)
     frame = np.full((H, W), 255, dtype=np.uint8)
     x0 = int(center_px[0] - size_px / 2)
@@ -65,7 +65,7 @@ def test_real_webcam_pipeline_end_to_end():
 
 def test_printed_tag_artwork_is_machine_readable():
     """The styled SVG labels must detect as the same marker id they embed."""
-    bits = marker_bits("DICT_4X4_50", 13)
+    bits = marker_bits("DICT_4X4_250", 13)
     svg = tag_svg(bits, "DRW/02", caption="desk drawer 2")
     # rasterize just the marker field the way a printer would: bits -> cells
     n = len(bits)
@@ -76,7 +76,7 @@ def test_printed_tag_artwork_is_machine_readable():
             if bit:
                 img[(iy + 1) * cell:(iy + 2) * cell, (ix + 1) * cell:(ix + 2) * cell] = 0
     corners, ids, _ = cv2.aruco.ArucoDetector(
-        cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50),
+        cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_250),
         cv2.aruco.DetectorParameters(),
     ).detectMarkers(cv2.cvtColor(img, cv2.COLOR_GRAY2BGR))
     assert ids is not None and list(ids.flatten()) == [13]
@@ -107,3 +107,91 @@ sensors:
     out = tmp_path / "snap.jpg"
     assert cv2.imwrite(str(out), frame)
     assert out.stat().st_size > 1000
+
+
+# --- single-marker pose bootstrap (webcam-setup) --------------------------------
+
+from hometwin.posefit import average_poses, camera_pose_from_marker, marker_corners_world
+
+
+def project_corners(geo, corners_world):
+    out = []
+    for p in corners_world:
+        pix = geo.world_to_pixel(p)
+        assert pix is not None
+        out.append((pix[0] * W, pix[1] * H))
+    return out
+
+
+def test_pose_bootstrap_recovers_camera_pose():
+    """Known camera -> projected marker corners -> PnP -> same camera."""
+    true_geo = CameraGeometry(position=(1.5, 0.0, 0.45), yaw_deg=90, pitch_deg=35,
+                              hfov_deg=70, aspect=W / H)
+    marker_pos, size = (1.5, 0.5, 0.0), 0.1
+    corners_px = project_corners(true_geo, marker_corners_world(marker_pos, size))
+    pose = camera_pose_from_marker(corners_px, (W, H), 70.0, marker_pos, size)
+    assert pose["position"] == pytest.approx((1.5, 0.0, 0.45), abs=0.01)
+    assert pose["yaw_deg"] == pytest.approx(90.0, abs=0.3)
+    assert pose["pitch_deg"] == pytest.approx(35.0, abs=0.3)
+    assert abs(pose["roll_deg"]) < 0.3
+
+
+def test_pose_bootstrap_with_rotated_marker():
+    true_geo = CameraGeometry(position=(0.2, 0.3, 2.2), yaw_deg=20, pitch_deg=55,
+                              hfov_deg=80, aspect=W / H)
+    marker_pos, size, myaw = (1.2, 1.4, 0.74), 0.08, 30.0
+    corners_px = project_corners(true_geo, marker_corners_world(marker_pos, size, myaw))
+    pose = camera_pose_from_marker(corners_px, (W, H), 80.0, marker_pos, size,
+                                   marker_yaw_deg=myaw)
+    assert pose["position"] == pytest.approx((0.2, 0.3, 2.2), abs=0.02)
+    assert pose["yaw_deg"] == pytest.approx(20.0, abs=0.5)
+
+
+def test_pose_bootstrap_average_smooths_noise():
+    import random
+
+    rng = random.Random(2)
+    true_geo = CameraGeometry(position=(1.5, 0.0, 0.45), yaw_deg=90, pitch_deg=35,
+                              hfov_deg=70, aspect=W / H)
+    marker_pos, size = (1.5, 0.5, 0.0), 0.1
+    clean = project_corners(true_geo, marker_corners_world(marker_pos, size))
+    poses = []
+    for _ in range(40):
+        noisy = [(u + rng.gauss(0, 0.7), v + rng.gauss(0, 0.7)) for u, v in clean]
+        poses.append(camera_pose_from_marker(noisy, (W, H), 70.0, marker_pos, size))
+    avg = average_poses(poses)
+    assert avg["position"] == pytest.approx((1.5, 0.0, 0.45), abs=0.02)
+    assert avg["yaw_deg"] == pytest.approx(90.0, abs=0.5)
+    assert avg["pitch_deg"] == pytest.approx(35.0, abs=0.5)
+
+
+def test_pose_bootstrap_from_real_detection():
+    """Full path: synthetic frame -> real cv2 corner detection -> PnP.
+
+    A straight-down camera sees the marker undistorted; the detected corner
+    pixels must reproduce the camera pose."""
+    import numpy as np
+
+    geo = CameraGeometry(position=(2.0, 2.0, 2.0), yaw_deg=0, pitch_deg=90,
+                         hfov_deg=70, aspect=W / H)
+    marker_pos, size_m = (2.0, 2.0, 0.0), 0.4
+    # render the marker exactly where the camera would see it
+    corners_world = marker_corners_world(marker_pos, size_m)
+    px = project_corners(geo, corners_world)
+    dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_250)
+    marker_img = cv2.aruco.generateImageMarker(dictionary, 100, 200)
+    frame = np.full((H, W), 255, dtype=np.uint8)
+    src = np.array([[0, 0], [199, 0], [199, 199], [0, 199]], dtype=np.float32)
+    M = cv2.getPerspectiveTransform(src, np.array(px, dtype=np.float32))
+    warped = cv2.warpPerspective(marker_img, M, (W, H),
+                                 borderValue=255, flags=cv2.INTER_NEAREST)
+    frame = np.minimum(frame, warped)
+    corners, ids, _ = cv2.aruco.ArucoDetector(
+        dictionary, cv2.aruco.DetectorParameters()
+    ).detectMarkers(cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR))
+    assert ids is not None and 100 in ids.flatten()
+    quad = corners[list(ids.flatten()).index(100)][0]
+    pose = camera_pose_from_marker([tuple(pt) for pt in quad], (W, H), 70.0,
+                                   marker_pos, size_m)
+    assert pose["position"] == pytest.approx((2.0, 2.0, 2.0), abs=0.05)
+    assert pose["pitch_deg"] == pytest.approx(90.0, abs=1.0)

@@ -13,7 +13,7 @@ from hometwin.registry import register
 
 @register("detector", "aruco")
 class ArucoDetector(Detector):
-    def __init__(self, dictionary: str = "DICT_4X4_50"):
+    def __init__(self, dictionary: str = "DICT_4X4_250"):
         try:
             import cv2
             import cv2.aruco  # noqa: F401

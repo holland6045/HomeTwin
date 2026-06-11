@@ -204,6 +204,72 @@ def cmd_capture_snapshots(args) -> int:
     return 0 if captured else 1
 
 
+def cmd_webcam_setup(args) -> int:
+    """Bootstrap the camera pose from one flat marker at a known position."""
+    try:
+        import cv2
+    except ImportError:
+        print("webcam-setup requires opencv: pip install hometwin[vision]", file=sys.stderr)
+        return 1
+    import time as _t
+
+    import yaml
+
+    from hometwin.detectors.aruco import ArucoDetector
+    from hometwin.posefit import average_poses, camera_pose_from_marker
+
+    cap = cv2.VideoCapture(args.device)
+    if not cap.isOpened():
+        print(f"cannot open camera {args.device!r}", file=sys.stderr)
+        return 1
+    det = ArucoDetector(dictionary=args.dictionary)
+    detector = det._detector
+    tag = f"aruco:{args.marker_id}"
+    print(f"lay marker {args.marker_id} FLAT at world {args.marker_pos}, top edge "
+          f"toward +y; collecting {args.frames} sightings...", file=sys.stderr)
+    poses = []
+    t0 = _t.time()
+    try:
+        while len(poses) < args.frames and _t.time() - t0 < args.timeout:
+            ok, frame = cap.read()
+            if not ok:
+                continue
+            corners, ids, _ = detector.detectMarkers(frame)
+            if ids is None:
+                continue
+            for quad, marker_id in zip(corners, ids.flatten()):
+                if int(marker_id) != args.marker_id:
+                    continue
+                h, w = frame.shape[:2]
+                poses.append(camera_pose_from_marker(
+                    [tuple(pt) for pt in quad[0]], (w, h), args.hfov,
+                    tuple(args.marker_pos), args.marker_mm / 1000.0))
+    finally:
+        cap.release()
+    if not poses:
+        print(f"never saw marker {args.marker_id} — check lighting/print size",
+              file=sys.stderr)
+        return 1
+    pose = average_poses(poses)
+    if abs(pose["roll_deg"]) > 5.0:
+        print(f"# WARNING: camera has {pose['roll_deg']:.1f} deg roll; "
+              "the pinhole model ignores roll — mount it level", file=sys.stderr)
+    print(f"# pose from {len(poses)} sightings — paste into your config:",
+          file=sys.stderr)
+    print(yaml.safe_dump([{
+        "type": "camera",
+        "id": "webcam",
+        "position": [round(v, 3) for v in pose["position"]],
+        "yaw_deg": round(pose["yaw_deg"], 2),
+        "pitch_deg": round(pose["pitch_deg"], 2),
+        "hfov_deg": args.hfov,
+        "surface_z": float(args.marker_pos[2]),
+        "source": {"type": "opencv", "device": args.device},
+        "detector": {"type": "aruco", "dictionary": args.dictionary},
+    }], sort_keys=False))
+    return 0
+
+
 def cmd_webcam_test(args) -> int:
     """Hardware smoke test: open the webcam, detect ArUco tags live."""
     try:
@@ -374,15 +440,29 @@ def main(argv: list[str] | None = None) -> int:
     plugp = sub.add_parser("plugins", help="list available plugins")
     plugp.set_defaults(fn=cmd_plugins)
 
+    setp = sub.add_parser(
+        "webcam-setup", help="compute the camera pose from one flat marker (PnP)")
+    setp.add_argument("--device", type=int, default=0)
+    setp.add_argument("--marker-id", type=int, default=100)
+    setp.add_argument("--marker-mm", type=float, default=100.0,
+                      help="printed marker side length (black border included)")
+    setp.add_argument("--marker-pos", type=float, nargs=3, default=[0.0, 0.0, 0.0],
+                      metavar=("X", "Y", "Z"), help="marker center in world metres")
+    setp.add_argument("--hfov", type=float, default=70.0, help="camera horizontal FOV")
+    setp.add_argument("--frames", type=int, default=30)
+    setp.add_argument("--timeout", type=float, default=30.0)
+    setp.add_argument("--dictionary", default="DICT_4X4_250")
+    setp.set_defaults(fn=cmd_webcam_setup)
+
     webp = sub.add_parser("webcam-test", help="open the webcam and detect tags live")
     webp.add_argument("--device", type=int, default=0)
     webp.add_argument("--seconds", type=int, default=15)
-    webp.add_argument("--dictionary", default="DICT_4X4_50")
+    webp.add_argument("--dictionary", default="DICT_4X4_250")
     webp.set_defaults(fn=cmd_webcam_test)
 
     ancp = sub.add_parser("make-anchor", help="generate a printable ArUco calibration target")
     ancp.add_argument("--id", type=int, required=True, help="marker id (use 100+ for anchors)")
-    ancp.add_argument("--dictionary", default="DICT_4X4_50")
+    ancp.add_argument("--dictionary", default="DICT_4X4_250")
     ancp.add_argument("--pixels", type=int, default=800)
     ancp.add_argument("-o", "--output")
     ancp.set_defaults(fn=cmd_make_anchor)
@@ -392,7 +472,7 @@ def main(argv: list[str] | None = None) -> int:
     tagp.add_argument("--ident", help='big label text, e.g. "BOX/07" or "DRW/02"')
     tagp.add_argument("--caption", default="", help="vertical rail text, e.g. drawer name")
     tagp.add_argument("--palette", default="signal", choices=["signal", "cyan", "magenta", "acid"])
-    tagp.add_argument("--dictionary", default="DICT_4X4_50")
+    tagp.add_argument("--dictionary", default="DICT_4X4_250")
     tagp.add_argument("--size-mm", type=float, default=60.0, help="printed width")
     tagp.add_argument("--layout", default="portrait", choices=["portrait", "wide"],
                       help="wide: 25:7 strip for shelf edges; marker keeps full height")

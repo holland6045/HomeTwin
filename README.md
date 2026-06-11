@@ -55,9 +55,10 @@ pip install -e .            # core: stdlib + PyYAML only
 pip install -e .[vision]    # optional: OpenCV cameras + ArUco
 pip install -e .[ml]        # optional: ONNX object detection
 
-# live on your PC with its webcam in three commands:
+# live on your PC with its webcam:
 hometwin make-anchor --id 7 -o tag-keys.png   # print, tape to your keys
 hometwin webcam-test                          # smoke test: detections + fps
+hometwin webcam-setup --marker-mm 100         # flat marker -> camera pose (PnP)
 hometwin run -c configs/webcam-quickstart.yaml  # dashboard on :8080
 
 # zero-hardware demo: synthetic apartment with all three modalities

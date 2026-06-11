@@ -59,8 +59,12 @@ class CameraGeometry:
         fy = cy * cp + cz * sp  # world-down component before yaw
         fz = -cy * sp + cz * cp  # forward component
         sy, cyw = math.sin(self.yaw), math.cos(self.yaw)
-        wx = fz * cyw - cx * sy
-        wy = fz * sy + cx * cyw
+        # camera-right maps to (sy, -cy): facing +y means image-right = +x.
+        # (The original sign here was mirrored — self-consistent with the
+        # inverse below, so simulations passed, but real cameras would have
+        # had world x flipped about the optical axis. Caught by PnP.)
+        wx = fz * cyw + cx * sy
+        wy = fz * sy - cx * cyw
         wz = -fy
         n = math.sqrt(wx * wx + wy * wy + wz * wz)
         return (wx / n, wy / n, wz / n)
@@ -82,7 +86,7 @@ class CameraGeometry:
         wx, wy, wz = (p[i] - self.position[i] for i in range(3))
         sy, cyw = math.sin(self.yaw), math.cos(self.yaw)
         fz = wx * cyw + wy * sy
-        cx = -wx * sy + wy * cyw
+        cx = wx * sy - wy * cyw
         fy = -wz
         sp, cp = math.sin(self.pitch), math.cos(self.pitch)
         cy = fy * cp - fz * sp
