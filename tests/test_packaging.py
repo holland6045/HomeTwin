@@ -67,6 +67,11 @@ def test_build_win_produces_valid_package(tmp_path):
         # Windows PowerShell 5.1 is the baseline; ?? and ?. are pwsh 7+
         assert " ?? " not in text and "?." not in text
 
+    # PS 5.1 reads BOM-less .ps1 as ANSI: any non-ASCII byte can decode to a
+    # smart quote and derail the parser, so shipped scripts must be pure ASCII
+    for script in [*pkg.glob("*.ps1"), *pkg.glob("*.bat")]:
+        script.read_bytes().decode("ascii")
+
     # batch files are what users double-click: CRLF for cmd.exe, relative
     # script paths so the folder can live anywhere
     for bat in pkg.glob("*.bat"):

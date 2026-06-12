@@ -1,6 +1,6 @@
 # HomeTwin launcher: owns a venv under %LOCALAPPDATA%\HomeTwin, self-updates
 # from the configured git channel, starts the tracker, opens the dashboard.
-# Relaunching IS the update — the same loop as HomeTwin.app on macOS.
+# Relaunching IS the update - the same loop as HomeTwin.app on macOS.
 $ErrorActionPreference = "Stop"
 
 $RepoUrl = if ($env:HOMETWIN_REPO) { $env:HOMETWIN_REPO } else { "__REPO_URL__" }
@@ -36,7 +36,7 @@ if (-not $Py) {
     exit 1
 }
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-    Alert "git not found. Install Git for Windows (git-scm.com), then relaunch — updates install straight from the repo."
+    Alert "git not found. Install Git for Windows (git-scm.com), then relaunch - updates install straight from the repo."
     exit 1
 }
 
@@ -55,7 +55,7 @@ function Install-Update($target) {
     Say "installing hometwin@$Channel ($target)"
     & (Join-Path $Venv "Scripts\python.exe") -m pip install --quiet --upgrade --force-reinstall `
         "hometwin[vision] @ git+$RepoUrl@$Channel" *>> $Log
-    if ($LASTEXITCODE -ne 0) { throw "pip install failed — see $Log" }
+    if ($LASTEXITCODE -ne 0) { throw "pip install failed - see $Log" }
     Set-Content (Join-Path $Support "installed-commit") $target
 }
 
@@ -72,12 +72,12 @@ $AutoFile = Join-Path $Support "autoupdate"
 if (-not (Test-Path (Join-Path $Venv "Scripts\python.exe"))) {
     Say "first run: creating venv"
     & $Py @PyArgs -m venv $Venv *>> $Log
-    if ($LASTEXITCODE -ne 0) { Alert "Could not create the Python environment — see $Log"; exit 1 }
+    if ($LASTEXITCODE -ne 0) { Alert "Could not create the Python environment - see $Log"; exit 1 }
     & (Join-Path $Venv "Scripts\python.exe") -m pip install --quiet --upgrade pip *>> $Log
     $target = Remote-Commit
     if (-not $target) { $target = "unknown" }
     try { Install-Update $target }
-    catch { Alert "First install failed — see $Log"; exit 1 }
+    catch { Alert "First install failed - see $Log"; exit 1 }
     if (-not (Test-Path $AutoFile)) { Set-Content $AutoFile "true" }
 } elseif ((Get-Content $AutoFile -ErrorAction SilentlyContinue) -eq "true") {
     $Remote = Remote-Commit
