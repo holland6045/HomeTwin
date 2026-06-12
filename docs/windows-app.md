@@ -8,12 +8,15 @@ are a pip reinstall from git — no rebuilding, no re-downloading.
 ## Build (once, on any machine — bash, not Windows)
 
 ```bash
-REPO_URL=https://github.com/holland6045/RGBDesk \
+REPO_URL=https://github.com/holland6045/HomeTwin \
 CHANNEL=claude/apartment-tracking-cv-app-9n823r \
 packaging/windows/build_win.sh
-
-(cd dist && zip -r HomeTwin-win.zip HomeTwin-win)   # copy to the PC
 ```
+
+The script zips the package itself as
+`dist/HomeTwin-win-<date>-<commit>.zip` — the suffix names the exact
+source build, so zips floating around Downloads folders stay traceable
+(`version.txt` inside matches). Copy the zip to the PC.
 
 `CHANNEL` is the git branch the launcher tracks — point it at the
 development branch while we iterate, at `main` when things settle.

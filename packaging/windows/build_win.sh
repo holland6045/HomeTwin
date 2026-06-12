@@ -15,9 +15,12 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
-REPO_URL="${REPO_URL:-https://github.com/holland6045/RGBDesk}"
+REPO_URL="${REPO_URL:-https://github.com/holland6045/HomeTwin}"
 CHANNEL="${CHANNEL:-main}"
-VERSION="${VERSION:-$(date +%Y.%m.%d)}"
+# default version carries the source commit as a sub-version, so a zip on
+# someone's Downloads folder traces back to the exact build
+GITREV="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo dev)"
+VERSION="${VERSION:-$(date +%Y.%m.%d)-$GITREV}"
 OUT="${OUT:-$ROOT/dist}"
 PKG="$OUT/HomeTwin-win"
 
@@ -43,4 +46,11 @@ cp "$ROOT/configs/webcam-quickstart.yaml" "$PKG/default-config.yaml"
 echo "$VERSION" > "$PKG/version.txt"
 
 echo "built $PKG (repo=$REPO_URL channel=$CHANNEL version=$VERSION)"
-echo "ship it: (cd $OUT && zip -r HomeTwin-win.zip HomeTwin-win)"
+
+ZIP="HomeTwin-win-$VERSION.zip"
+if command -v zip >/dev/null 2>&1; then
+    (cd "$OUT" && rm -f "$ZIP" && zip -qr "$ZIP" HomeTwin-win)
+    echo "ship it: $OUT/$ZIP"
+else
+    echo "zip not found; ship it: (cd $OUT && zip -r $ZIP HomeTwin-win)"
+fi

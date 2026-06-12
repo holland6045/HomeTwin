@@ -60,6 +60,10 @@ def test_build_win_produces_valid_package(tmp_path):
     assert (pkg / "version.txt").read_text().strip() == "9.9.9"
     assert "type: camera" in (pkg / "default-config.yaml").read_text()
 
+    # the shipped zip carries the version for traceability
+    if shutil.which("zip"):
+        assert (tmp_path / "HomeTwin-win-9.9.9.zip").exists()
+
     for ps1 in ("launcher.ps1", "update.ps1"):
         text = (pkg / ps1).read_text()
         assert "https://example.com/repo" in text and "test-channel" in text
