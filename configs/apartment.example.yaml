@@ -98,6 +98,20 @@ sensors:
   #   source: {type: opencv, device: "http://192.168.1.40/mjpeg"}
   #   detector: {type: onnx, model_path: models/my_items.onnx, labels: [keys, wallet, cell phone]}
 
+  # COCO-class detection with RT-DETRv2 (Apache-2.0, NMS-free): person,
+  # cell phone, backpack, laptop... out of the box. Export weights once
+  # with scripts/export_rtdetr.sh. "person" detections feed motion zones
+  # (tracker.presence_labels), so a webcam alone drives the synthetic
+  # PIRs below — no RF mesh needed.
+  # - type: camera
+  #   id: cam-entry
+  #   position: [0.2, 3.8, 2.3]
+  #   yaw_deg: -45
+  #   pitch_deg: 35
+  #   surface_z: 0.0
+  #   source: {type: opencv, device: 0}
+  #   detector: {type: rtdetr, model_path: rtdetr_onnx/model.onnx}
+
   # Multi-camera 3D: overlapping cameras in ray mode emit sight rays that
   # the fusion engine triangulates — no surface assumption, tracks items in
   # motion. One viewpoint alone falls back to an item-height depth prior.

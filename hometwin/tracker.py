@@ -20,6 +20,7 @@ from hometwin.fusion import FusionEngine
 from hometwin.observations import (
     AreaObservation,
     BearingObservation,
+    PositionObservation,
     RangeObservation,
 )
 from hometwin.store import StateStore
@@ -175,6 +176,23 @@ class Tracker:
                         "centroid": list(obs.centroid),
                         "sigma_m": obs.sigma_m,
                         "zone": self.cfg.world.locate(obs.centroid),
+                        "timestamp": obs.timestamp,
+                    }
+                elif (
+                    isinstance(obs, PositionObservation)
+                    and obs.label in self.cfg.presence_labels
+                ):
+                    # camera person-detections that map to no item are
+                    # occupancy: they drive motion zones, the presence
+                    # display, and the world model — synthetic PIRs work
+                    # from a webcam alone
+                    self.worldmodel.add_point(obs.position, obs.timestamp, weight=0.3)
+                    self._motion_evidence(obs.position, obs.timestamp, obs.sigma_m)
+                    self.presence = {
+                        "sensor_id": obs.sensor_id,
+                        "centroid": list(obs.position),
+                        "sigma_m": obs.sigma_m,
+                        "zone": self.cfg.world.locate(obs.position),
                         "timestamp": obs.timestamp,
                     }
         self._record_zone_changes(touched)

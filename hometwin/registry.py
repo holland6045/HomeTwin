@@ -51,6 +51,7 @@ _BUILTIN_MODULES = (
     "hometwin.sensors.network",
     "hometwin.detectors.aruco",
     "hometwin.detectors.onnx",
+    "hometwin.detectors.rtdetr",
     "hometwin.training.trainers",
 )
 
