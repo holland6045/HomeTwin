@@ -303,6 +303,13 @@ git channel branch on every launch** — relaunching the app is the update
 while we iterate. Details: `docs/macos-app.md`. The hardware rollout is
 chunked into testable blocks in `docs/development-plan.md`.
 
+## On Windows: HomeTwin-win
+
+The same loop for a Windows test box: `packaging/windows/build_win.sh`
+assembles an unzip-anywhere folder whose `HomeTwin.bat` owns a venv under
+`%LOCALAPPDATA%\HomeTwin` and self-updates from the channel branch on
+every launch. Details: `docs/windows-app.md`.
+
 ## Repository layout
 
 ```
