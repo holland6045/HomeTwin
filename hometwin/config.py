@@ -32,6 +32,8 @@ class AppConfig:
     parallel_polling: bool = True
     anchors: dict = field(default_factory=dict)  # fiducial tag -> world position
     movables: object = None  # MovableRegistry (doors/drawers) or None
+    motion_zones: object = None  # MotionZoneController or None
+    hass: object = None  # HomeAssistantBridge or None
     device_tags: object = None  # DeviceTagSolver (tags on sensors) or None
     splat_asset: str | None = None  # .splat/.ply scan rendered by the dashboard's 3D tab
     floorplan: dict | None = None  # {image, width_m}: map-view background
@@ -117,6 +119,30 @@ def load_config(path: str | Path) -> AppConfig:
                     "tag %s is on a movable; removed from anchors", tag
                 )
 
+    motion_zones = None
+    hass_bridge = None
+    if raw.get("motion_zones") or raw.get("home_assistant"):
+        from hometwin.hass import (
+            HomeAssistantBridge, MiniMqtt, MotionZoneController,
+        )
+
+        ha_cfg = raw.get("home_assistant", {}) or {}
+        motion_zones = MotionZoneController.from_config(
+            raw.get("motion_zones", []),
+            default_off_delay=float(ha_cfg.get("off_delay_s", 30.0)),
+        )
+        mqtt_cfg = ha_cfg.get("mqtt")
+        if mqtt_cfg:
+            hass_bridge = HomeAssistantBridge(
+                MiniMqtt(
+                    mqtt_cfg["host"],
+                    int(mqtt_cfg.get("port", 1883)),
+                    mqtt_cfg.get("username"),
+                    mqtt_cfg.get("password"),
+                ),
+                discovery_prefix=ha_cfg.get("discovery_prefix", "homeassistant"),
+            )
+
     for sensor in sensors:
         if anchors and hasattr(sensor, "attach_anchors"):
             sensor.attach_anchors(anchors)
@@ -142,6 +168,8 @@ def load_config(path: str | Path) -> AppConfig:
         parallel_polling=bool(tracker.get("parallel_polling", True)),
         anchors=anchors,
         movables=movables,
+        motion_zones=motion_zones,
+        hass=hass_bridge,
         device_tags=device_tags,
         floorplan=raw.get("world", {}).get("floorplan"),
         splat_asset=raw.get("world", {}).get("splat_asset"),

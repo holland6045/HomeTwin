@@ -169,6 +169,7 @@ class Tracker:
                         }
                 elif isinstance(obs, AreaObservation):
                     self.worldmodel.add_point(obs.centroid, obs.timestamp, weight=0.3)
+                    self._motion_evidence(obs.centroid, obs.timestamp, obs.sigma_m)
                     self.presence = {
                         "sensor_id": obs.sensor_id,
                         "centroid": list(obs.centroid),
@@ -178,6 +179,15 @@ class Tracker:
                     }
         self._record_zone_changes(touched)
         if self.cfg.movables is not None:
+            for event in self.cfg.movables.events:
+                # a drawer/door physically moving IS motion at its location
+                movable = next(
+                    (m for m in self.cfg.movables.movables
+                     if m.name == event.get("movable")), None)
+                if movable is not None:
+                    st = self.cfg.movables.states[movable.name]
+                    self._motion_evidence(
+                        movable.position_at(st.openness), event["timestamp"], 0.3)
             for m in self.cfg.movables.movables:
                 st = self.cfg.movables.states[m.name]
                 if st.last_seen and st.last_seen not in self._wm_movable_seen.get(m.name, ()):
@@ -190,7 +200,34 @@ class Tracker:
         from hometwin.learning import collect_ble_samples
 
         collect_ble_samples(self)
+        self._expire_motion_zones()
         return count
+
+    def _motion_evidence(self, p, ts: float, sigma_m: float = 0.0) -> None:
+        mz = self.cfg.motion_zones
+        if mz is None:
+            return
+        self._motion_clock = max(getattr(self, "_motion_clock", 0.0), ts)
+        for zone in mz.evidence(p, ts, sigma_m):
+            self.events.append({"timestamp": ts, "motion_zone": zone.name, "state": "ON"})
+            if self.cfg.hass is not None:
+                self.cfg.hass.publish_state(zone)
+
+    def _expire_motion_zones(self) -> None:
+        mz = self.cfg.motion_zones
+        if mz is None:
+            return
+        # live: expire on wall time so zones clear even when evidence stops
+        # entirely; sim/replay (evidence clock far from wall) expires on the
+        # evidence clock so synthetic runs behave deterministically
+        wall = time.time()
+        clock = getattr(self, "_motion_clock", 0.0)
+        now = wall if wall - clock < 3600.0 else clock
+        for zone in mz.expire(now):
+            self.events.append(
+                {"timestamp": now, "motion_zone": zone.name, "state": "OFF"})
+            if self.cfg.hass is not None:
+                self.cfg.hass.publish_state(zone)
 
     def learning_status(self) -> list[dict]:
         learners = getattr(self, "_path_loss_learners", {})

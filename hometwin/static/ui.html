@@ -61,6 +61,7 @@ const LAYERS = [
   ["spots", "Spots", true],
   ["movables", "Doors/drawers", true],
   ["worldmodel", "World model", true],
+  ["motion", "Motion zones", true],
   ["items", "Items", true],
   ["presence", "Presence", true],
 ];
@@ -254,6 +255,26 @@ function renderMap(d) {
     ctx.beginPath(); ctx.arc(tx, ty, 4, 0, 7); ctx.fill();
     ctx.fillStyle = "#7d8696"; ctx.font = "10px system-ui";
     ctx.fillText(`${m.name} ${m.is_open ? "OPEN" : "closed"}`, tx + 7, ty + 4);
+  }
+
+  if (on("motion")) for (const m of (d.motion_zones || [])) {
+    const col = m.on ? "rgba(239,68,68," : "rgba(86,96,115,";
+    ctx.lineWidth = 2;
+    if (m.center) {
+      const [cx, cy] = T(m.center);
+      ctx.fillStyle = col + "0.12)"; ctx.strokeStyle = col + "0.8)";
+      ctx.beginPath(); ctx.arc(cx, cy, m.radius * scale, 0, 7);
+      ctx.fill(); ctx.stroke();
+      ctx.fillStyle = col + "1)"; ctx.font = "11px system-ui";
+      ctx.fillText(`${m.name} ${m.on ? "MOTION" : ""}`, cx + 6, cy - m.radius * scale - 4);
+    } else {
+      const [x0, y0] = T(m.min), [x1, y1] = T(m.max);
+      ctx.fillStyle = col + "0.12)"; ctx.strokeStyle = col + "0.8)";
+      ctx.fillRect(x0, y1, x1 - x0, y0 - y1);
+      ctx.strokeRect(x0, y1, x1 - x0, y0 - y1);
+      ctx.fillStyle = col + "1)"; ctx.font = "11px system-ui";
+      ctx.fillText(`${m.name} ${m.on ? "MOTION" : ""}`, x0 + 4, y1 - 4);
+    }
   }
 
   if (on("spots")) for (const s of (d.spots || [])) {
@@ -700,6 +721,37 @@ async function tick() {
     render();
   } catch (e) { /* tracker restarting; retry next tick */ }
 }
+
+// shift-drag on the map draws a new motion-sensor zone
+let dragStart = null;
+function canvasToWorld(ev) {
+  const rect = canvas.getBoundingClientRect();
+  const px = ev.clientX - rect.left, py = ev.clientY - rect.top;
+  const T = mapTransform(state.data);
+  const [ox, oy, s] = T([0, 0]);
+  return [(px - ox) / s, (oy - py) / s];
+}
+canvas.addEventListener("mousedown", (ev) => {
+  if (ev.shiftKey && state.view === "map" && state.data) dragStart = canvasToWorld(ev);
+});
+canvas.addEventListener("mouseup", async (ev) => {
+  if (!dragStart) return;
+  const a = dragStart, b = canvasToWorld(ev);
+  dragStart = null;
+  if (Math.abs(a[0] - b[0]) < 0.1 || Math.abs(a[1] - b[1]) < 0.1) return;
+  const name = prompt("Motion zone name (becomes a Home Assistant device):");
+  if (!name) return;
+  await fetch("/motion-zones", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({
+      name,
+      min: [Math.min(a[0], b[0]), Math.min(a[1], b[1]), 0.0],
+      max: [Math.max(a[0], b[0]), Math.max(a[1], b[1]), 2.6],
+    }),
+  });
+  tick();
+});
 
 canvas.addEventListener("click", (ev) => {
   if (state.view !== "map" || !state.data) return;

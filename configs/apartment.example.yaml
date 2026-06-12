@@ -139,6 +139,16 @@ sensors:
     # connection — no per-message cost). Omit only on a trusted IoT VLAN.
     # auth_token: "change-me-bridge-secret"
 
+# Expose presence as Home Assistant motion sensors: draw zones (or
+# shift-drag them on the dashboard map) and each becomes its own HA device
+# via MQTT discovery. docs/home-assistant.md
+# home_assistant:
+#   mqtt: {host: 192.168.1.5, port: 1883}
+#   off_delay_s: 30
+# motion_zones:
+#   - {name: living-room-motion, min: [0, 0, 0], max: [5, 4, 2.6]}
+#   - {name: hallway-motion, center: [6.0, 2.0], radius: 1.2}
+
 tracker:
   poll_hz: 10
   stale_after_s: 300

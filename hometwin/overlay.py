@@ -133,6 +133,11 @@ def map_overlay(tracker) -> dict:
             for sensor in tracker.sensors
             for prof in list(getattr(sensor, "profiles", {}).values())
         ],
+        "motion_zones": (
+            tracker.cfg.motion_zones.snapshot()
+            if getattr(tracker.cfg, "motion_zones", None)
+            else []
+        ),
         "device_tags": (
             tracker.cfg.device_tags.snapshot()
             if getattr(tracker.cfg, "device_tags", None)

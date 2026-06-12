@@ -11,6 +11,8 @@ GET  /overlay/camera/<sensor_id> -> same layers projected into camera pixels
 POST /items/<id>/tags  -> {"tag": "ble:AA:.."} manual tagging at runtime
 POST /anchors          -> {"tag", "position"} drop a calibration anchor at
                           runtime (map-click coords / board-check output)
+POST /motion-zones     -> {"name", min/max | center/radius} create a synthetic
+                          motion-sensor zone (announced to Home Assistant)
 POST /assets/splat     -> replace the splat scan (raw body); atomic, no restart
 POST /assets/splat/transform -> update world.splat_transform at runtime
 
@@ -222,6 +224,32 @@ def make_handler(tracker: Tracker, policy: AuthPolicy):
                     return
                 tracker.cfg.splat_transform = body or None
                 self._send(200, {"status": "updated", "note": "runtime only — persist in config"})
+            elif parts == ["motion-zones"]:
+                if tracker.cfg.motion_zones is None:
+                    from hometwin.hass import MotionZoneController
+
+                    tracker.cfg.motion_zones = MotionZoneController()
+                length = int(self.headers.get("Content-Length", 0))
+                try:
+                    body = json.loads(self.rfile.read(length) or b"{}")
+                    from hometwin.hass import MotionZone
+
+                    zone = MotionZone(
+                        str(body["name"]),
+                        min_corner=body.get("min"),
+                        max_corner=body.get("max"),
+                        center=body.get("center"),
+                        radius=body.get("radius"),
+                        off_delay_s=float(body.get("off_delay_s", 30.0)),
+                    )
+                    tracker.cfg.motion_zones.add(zone)
+                except (KeyError, TypeError, ValueError) as e:
+                    self._send(400, {"error": str(e)})
+                    return
+                if tracker.cfg.hass is not None:
+                    tracker.cfg.hass.announce(zone)
+                self._send(200, {"status": "created", "slug": zone.slug,
+                                 "note": "runtime only — persist in config"})
             elif parts == ["anchors"]:
                 length = int(self.headers.get("Content-Length", 0))
                 try:

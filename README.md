@@ -144,6 +144,12 @@ rendering is client-side canvas, so the core stays dependency-free. Any
 sensor can publish a drawable layer by implementing `overlay()` — the UI
 picks it up without changes.
 
+**Home Assistant:** draw detection zones on the map (shift-drag) and
+each becomes its own HA device — a synthetic motion `binary_sensor` via
+MQTT discovery, driven by tomography presence and door/drawer activity
+with PIR-style off-delay. Stdlib MQTT client, broker outages absorbed.
+`docs/home-assistant.md`.
+
 **World model (passive):** the twin sketches its own space — trusted
 position fixes deposit into a decaying voxel grid (floaters compacted
 away, memory bounded), rendered as a lidar-style height-colored point
