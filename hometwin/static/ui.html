@@ -715,14 +715,15 @@ async function tick() {
       renderPanel(d.items, d.events);
       if (want3d) { ensurePointCloud(); if (splat3d) update3D(d); return; }
       stream.style.display = "none";
+      // drop the MJPEG connection (each open stream holds a server thread)
+      if (stream.dataset.src) { delete stream.dataset.src; stream.removeAttribute("src"); }
     } else {
-      if (d.stream_url) { stream.src = d.stream_url; stream.style.display = "block"; }
-      else {
-        // no external stream: poll the tracker's own latest-frame endpoint
-        const base = assetUrl(`/camera/${encodeURIComponent(state.view)}/frame.jpg`);
-        stream.src = base + (base.includes("?") ? "&" : "?") + "t=" + Date.now();
-        stream.style.display = "block";
-      }
+      // external stream if configured, else the tracker's own MJPEG of
+      // captured frames; set src only on change — re-assigning reconnects
+      const want = d.stream_url
+        || assetUrl(`/camera/${encodeURIComponent(state.view)}/stream.mjpg`);
+      if (stream.dataset.src !== want) { stream.dataset.src = want; stream.src = want; }
+      stream.style.display = "block";
       const map = await (await authFetch("/overlay/map")).json();
       renderPanel(map.items, map.events);
     }

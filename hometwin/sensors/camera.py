@@ -272,24 +272,111 @@ class CameraSensor(SensorAdapter):
 
 @register("frame_source", "opencv")
 class OpenCVFrameSource:
-    """USB webcam, RTSP/MJPEG URL (ESP32-CAM), or video file via cv2."""
+    """USB webcam, RTSP/MJPEG URL (ESP32-CAM), or video file via cv2.
 
-    def __init__(self, device: int | str = 0):
+    Mode negotiation: most UVC webcams default to 640x480 and need the
+    MJPG fourcc to deliver their full resolution at full frame rate
+    (uncompressed YUY2 saturates USB2 well below 1080p30). Find what the
+    hardware supports with `hometwin webcam-probe`, then configure:
+
+        source: {type: opencv, device: 0, width: 1920, height: 1080,
+                 fps: 30, fourcc: MJPG}
+
+    A capture thread drains the camera continuously so `get_frame()`
+    always returns the freshest frame — without it, cv2 buffers frames
+    internally and detection lags seconds behind reality at low poll
+    rates. Each frame is handed out once; repeat calls between captures
+    return None (no wasted re-detection on identical frames).
+    """
+
+    def __init__(
+        self,
+        device: int | str = 0,
+        width: int | None = None,
+        height: int | None = None,
+        fps: float | None = None,
+        fourcc: str | None = None,
+        threaded: bool = True,
+    ):
         self.device = device
+        self.width, self.height, self.fps, self.fourcc = width, height, fps, fourcc
+        self.threaded = threaded
         self._cap = None
+        self._thread = None
+        self._stop = None
+        self._lock = None
+        self._latest = None  # (seq, frame)
+        self._served_seq = 0
+        self._negotiated: dict = {}
 
-    def start(self) -> None:
+    def _open(self):
         try:
             import cv2
         except ImportError as e:
             raise RuntimeError(
                 "frame_source 'opencv' requires opencv: pip install hometwin[vision]"
             ) from e
-        self._cap = cv2.VideoCapture(self.device)
-        if not self._cap.isOpened():
+        cap = cv2.VideoCapture(self.device)
+        if not cap.isOpened():
             raise RuntimeError(f"cannot open camera {self.device!r}")
+        # fourcc first: switching to MJPG changes which modes are offered
+        if self.fourcc:
+            cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*self.fourcc))
+        if self.width:
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+        if self.height:
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+        if self.fps:
+            cap.set(cv2.CAP_PROP_FPS, self.fps)
+        fcc = int(cap.get(cv2.CAP_PROP_FOURCC)) & 0xFFFFFFFF
+        self._negotiated = {
+            "width": int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
+            "height": int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+            "fps": round(cap.get(cv2.CAP_PROP_FPS), 1),
+            "fourcc": "".join(chr((fcc >> 8 * i) & 0xFF) for i in range(4)).strip("\0 "),
+            "backend": cap.getBackendName(),
+            "threaded": self.threaded,
+        }
+        return cap
+
+    def describe(self) -> dict:
+        """Requested vs negotiated capture mode, for diagnostics."""
+        return {
+            "device": self.device,
+            "requested": {k: v for k, v in (("width", self.width), ("height", self.height),
+                                            ("fps", self.fps), ("fourcc", self.fourcc)) if v},
+            "negotiated": dict(self._negotiated),
+        }
+
+    def _capture_loop(self) -> None:
+        seq = 0
+        while not self._stop.is_set():
+            ok, frame = self._cap.read()
+            if not ok:
+                self._stop.wait(0.05)  # camera hiccup; keep trying
+                continue
+            seq += 1
+            with self._lock:
+                self._latest = (seq, frame)
+
+    def start(self) -> None:
+        import threading
+
+        self._cap = self._open()
+        if not self.threaded:
+            return
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._thread = threading.Thread(
+            target=self._capture_loop, name=f"capture-{self.device}", daemon=True
+        )
+        self._thread.start()
 
     def stop(self) -> None:
+        if self._stop is not None:
+            self._stop.set()
+            self._thread.join(timeout=2.0)
+            self._thread = self._stop = None
         if self._cap is not None:
             self._cap.release()
             self._cap = None
@@ -297,8 +384,14 @@ class OpenCVFrameSource:
     def get_frame(self):
         if self._cap is None:
             return None
-        ok, frame = self._cap.read()
-        return frame if ok else None
+        if not self.threaded:
+            ok, frame = self._cap.read()
+            return frame if ok else None
+        with self._lock:
+            if self._latest is None or self._latest[0] == self._served_seq:
+                return None
+            self._served_seq, frame = self._latest
+        return frame
 
 
 @register("frame_source", "static")

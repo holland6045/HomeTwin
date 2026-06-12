@@ -328,6 +328,66 @@ def cmd_webcam_test(args) -> int:
     return 0 if frames else 1
 
 
+def cmd_webcam_probe(args) -> int:
+    """Find the best capture mode the hardware supports.
+
+    Tries a resolution ladder with and without the MJPG fourcc (UVC
+    webcams usually need MJPG for full resolution at full frame rate),
+    measures delivered fps for each, and prints the config block for the
+    best mode. Run once per camera, paste the output, forget about it.
+    """
+    try:
+        import cv2
+    except ImportError:
+        print("webcam-probe requires opencv: pip install hometwin[vision]", file=sys.stderr)
+        return 1
+    import time as _t
+
+    ladder = [(640, 480), (1280, 720), (1920, 1080), (2560, 1440), (3840, 2160)]
+    results = []  # (w, h, fps_measured, fourcc_label)
+    for fourcc in ("MJPG", None):
+        for w, h in ladder:
+            cap = cv2.VideoCapture(args.device)
+            if not cap.isOpened():
+                print(f"cannot open camera {args.device!r} — check the device index "
+                      "(try --device 1) and that no other app holds the camera",
+                      file=sys.stderr)
+                return 1
+            if fourcc:
+                cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*fourcc))
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
+            cap.set(cv2.CAP_PROP_FPS, 60)
+            ok, frame = cap.read()
+            if not ok:
+                cap.release()
+                continue
+            ah, aw = frame.shape[:2]
+            for _ in range(3):  # let exposure settle before timing
+                cap.read()
+            n, t0 = 0, _t.time()
+            while n < args.frames and _t.time() - t0 < 3.0:
+                if cap.read()[0]:
+                    n += 1
+            dt = max(_t.time() - t0, 1e-6)
+            cap.release()
+            mode = (aw, ah, round(n / dt, 1), fourcc or "default")
+            if not any(r[0] == aw and r[1] == ah and r[3] == mode[3] for r in results):
+                results.append(mode)
+                print(f"  {mode[3]:>7}  requested {w}x{h:<5} -> got {aw}x{ah} "
+                      f"@ {mode[2]} fps", file=sys.stderr)
+
+    if not results:
+        print("no mode delivered frames", file=sys.stderr)
+        return 1
+    best = max(results, key=lambda r: (r[0] * r[1], r[2]))
+    print(f"\n# best mode — paste into the camera's source block:")
+    line = f"source: {{type: opencv, device: {args.device}, width: {best[0]}, " \
+           f"height: {best[1]}, fps: {int(best[2])}"
+    print(line + (f", fourcc: {best[3]}}}" if best[3] != "default" else "}"))
+    return 0
+
+
 def cmd_board_check(args) -> int:
     """Precision instrument: a calibrated camera measures the board.
 
@@ -629,6 +689,13 @@ def main(argv: list[str] | None = None) -> int:
     webp.add_argument("--seconds", type=int, default=15)
     webp.add_argument("--dictionary", default="DICT_4X4_250")
     webp.set_defaults(fn=cmd_webcam_test)
+
+    probp = sub.add_parser("webcam-probe",
+                           help="find the camera's best capture mode (resolution/fps)")
+    probp.add_argument("--device", type=int, default=0)
+    probp.add_argument("--frames", type=int, default=30,
+                       help="frames to time per mode (default 30)")
+    probp.set_defaults(fn=cmd_webcam_probe)
 
     bchk = sub.add_parser("board-check",
                           help="measure the board with a calibrated camera: "

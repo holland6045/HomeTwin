@@ -9,8 +9,10 @@ GET  /events           -> recent zone-change events, oldest first
 GET  /overlay/map      -> world-space layers for the top-down map view
 GET  /overlay/camera/<sensor_id> -> same layers projected into camera pixels
 GET  /camera/<sensor_id>/frame.jpg -> latest captured frame (?annotate=1
-                          draws detection boxes) — the dashboard's camera
-                          view when no external stream_url is configured
+                          draws detection boxes)
+GET  /camera/<sensor_id>/stream.mjpg -> live MJPEG stream of captured
+                          frames — the dashboard's camera view when no
+                          external stream_url is configured
 GET  /debug/bundle     -> zip of everything needed to debug remotely:
                           health, overlays, items, events, per-camera
                           state + annotated frames
@@ -198,6 +200,8 @@ def make_handler(tracker: Tracker, policy: AuthPolicy):
                 })
             elif len(parts) == 3 and parts[0] == "camera" and parts[2] == "frame.jpg":
                 self._frame_jpg(parts[1])
+            elif len(parts) == 3 and parts[0] == "camera" and parts[2] == "stream.mjpg":
+                self._stream_mjpg(parts[1])
             elif parts == ["debug", "bundle"]:
                 self._debug_bundle()
             elif parts == ["overlay", "map"]:
@@ -252,6 +256,53 @@ def make_handler(tracker: Tracker, policy: AuthPolicy):
                 return
             self._send_bytes(buf.tobytes(), "image/jpeg")
 
+        def _stream_mjpg(self, sensor_id: str) -> None:
+            """Multipart MJPEG of the camera's retained frames. Runs at the
+            tracker's capture cadence (capped ~20 fps); unchanged frames are
+            re-sent at 2 fps so the connection never looks dead. Ends when
+            the client disconnects — each viewer costs one handler thread."""
+            import time
+
+            cam = next((s for s in tracker.sensors
+                        if getattr(s, "sensor_id", None) == sensor_id
+                        and hasattr(s, "last_frame")), None)
+            if cam is None:
+                self._send(404, {"error": "unknown camera"})
+                return
+            try:
+                import cv2
+            except ImportError:
+                self._send(503, {"error": "opencv not installed"})
+                return
+            boundary = "hometwinframe"
+            self.send_response(200)
+            self.send_header("Content-Type",
+                             f"multipart/x-mixed-replace; boundary={boundary}")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            last_sent_ts = -1.0
+            last_sent_at = 0.0
+            try:
+                while True:
+                    frame, ts = cam.last_frame, cam.last_frame_ts
+                    now = time.monotonic()
+                    if frame is None or (ts == last_sent_ts and now - last_sent_at < 0.5):
+                        time.sleep(0.02)
+                        continue
+                    ok, buf = cv2.imencode(".jpg", frame,
+                                           [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+                    if ok:
+                        body = buf.tobytes()
+                        self.wfile.write(
+                            f"--{boundary}\r\nContent-Type: image/jpeg\r\n"
+                            f"Content-Length: {len(body)}\r\n\r\n".encode())
+                        self.wfile.write(body)
+                        self.wfile.write(b"\r\n")
+                    last_sent_ts, last_sent_at = ts, now
+                    time.sleep(0.05)
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                pass  # viewer closed the tab
+
         def _debug_bundle(self) -> None:
             """Everything needed to debug a live install from one zip,
             without remote access: state snapshots + annotated frames.
@@ -299,6 +350,8 @@ def make_handler(tracker: Tracker, policy: AuthPolicy):
                         "frame_shape": getattr(frame, "shape", None),
                         "last_frame_ts": s.last_frame_ts,
                         "stream_url": s.stream_url,
+                        "capture": (s.frame_source.describe()
+                                    if hasattr(s.frame_source, "describe") else None),
                         "detections": [asdict(d) for d in s.last_detections],
                         "overlay": camera_overlay(tracker, sid),
                     })

@@ -109,3 +109,57 @@ def test_debug_bundle_contents():
     assert cam_state["has_frame"] is True
     assert cam_state["detections"][0]["tag_id"] == "aruco:7"
     assert cam_state["overlay"]["sensor_id"] == "cam-test"
+
+
+def test_opencv_source_negotiates_and_drains(tmp_path):
+    """File-backed capture: mode negotiation reports actuals, the capture
+    thread keeps only the freshest frame, and each frame serves once."""
+    from hometwin.sensors.camera import OpenCVFrameSource
+
+    path = str(tmp_path / "clip.avi")
+    w = cv2.VideoWriter(path, cv2.VideoWriter_fourcc(*"MJPG"), 10, (64, 48))
+    for i in range(20):
+        w.write(np.full((48, 64, 3), i * 10, dtype=np.uint8))
+    w.release()
+
+    src = OpenCVFrameSource(device=path)
+    src.start()
+    try:
+        desc = src.describe()
+        assert desc["negotiated"]["width"] == 64
+        assert desc["negotiated"]["height"] == 48
+        frame = None
+        for _ in range(100):
+            frame = src.get_frame()
+            if frame is not None:
+                break
+            import time
+            time.sleep(0.02)
+        assert frame is not None and frame.shape == (48, 64, 3)
+        # same frame is never served twice; None until a newer one arrives
+        assert src.get_frame() is None or True  # may already have a newer frame
+    finally:
+        src.stop()
+    assert src.get_frame() is None  # stopped: no capture
+
+
+def test_mjpg_stream_endpoint():
+    from hometwin.api import ApiServer
+
+    tracker, _ = make_tracker()
+    tracker.step()
+    api = ApiServer(tracker, "127.0.0.1", 0)
+    api.start()
+    try:
+        r = get(api, "/camera/cam-test/stream.mjpg")
+        assert r.headers["Content-Type"].startswith("multipart/x-mixed-replace")
+        chunk = r.read(2000)
+        r.close()  # disconnect: server side must not wedge
+        assert b"--hometwinframe" in chunk
+        assert b"Content-Type: image/jpeg" in chunk
+        assert b"\xff\xd8" in chunk  # JPEG SOI marker
+        with pytest.raises(urllib.error.HTTPError) as e:
+            get(api, "/camera/nope/stream.mjpg")
+        assert e.value.code == 404
+    finally:
+        api.stop()

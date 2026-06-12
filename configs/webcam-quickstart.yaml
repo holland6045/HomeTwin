@@ -36,7 +36,9 @@ sensors:
     hfov_deg: 70
     surface_z: 0.0       # detections assumed on the desk plane (origin z)
     base_sigma_m: 0.1
-    source: {type: opencv, device: 0}
+    # MJPG + explicit size: webcams default to 640x480 without it. Verify
+    # the best mode for your hardware with: hometwin webcam-probe
+    source: {type: opencv, device: 0, width: 1920, height: 1080, fps: 30, fourcc: MJPG}
     detector: {type: aruco, dictionary: DICT_4X4_250}
 
 tracker:
