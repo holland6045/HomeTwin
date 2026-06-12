@@ -29,6 +29,22 @@
   .zone-name { color:var(--accent); }
   .stale { color:#e0a23c; } .never { color:var(--dim); }
   .ev { color:var(--dim); font-size:12px; padding:2px 0; }
+  #gear { margin-left:auto; background:none; border:1px solid #333a45; color:var(--fg);
+    padding:4px 10px; border-radius:6px; cursor:pointer; font-size:14px; }
+  #settings { display:none; position:fixed; inset:0; background:rgba(0,0,0,.55);
+    z-index:10; align-items:center; justify-content:center; }
+  #settings-card { width:460px; max-height:82vh; overflow:auto; }
+  #settings input, #settings select { background:#0b0d10; color:var(--fg);
+    border:1px solid #333a45; border-radius:4px; padding:3px 6px; width:64px; }
+  #settings button { background:none; border:1px solid #333a45; color:var(--fg);
+    padding:4px 10px; border-radius:6px; cursor:pointer; font-size:13px; }
+  #settings button:hover { border-color:var(--accent); color:var(--accent); }
+  .cam-cfg { padding:8px 0; border-bottom:1px solid #262c35; }
+  .cam-cfg .now { color:var(--dim); font-size:12px; margin:2px 0 6px; }
+  .cam-cfg .fields { display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end; }
+  .cam-cfg label { display:flex; flex-direction:column; gap:2px; font-size:11px; color:var(--dim); }
+  .sysrow { display:flex; gap:8px; margin:6px 0; flex-wrap:wrap; }
+  #sys-shutdown { border-color:#7a3a3a; }
 </style>
 </head>
 <body>
@@ -36,7 +52,20 @@
   <h1>HomeTwin</h1>
   <div class="tabs" id="tabs"></div>
   <div class="layers" id="layers"></div>
+  <button id="gear" title="Settings">&#9881; Settings</button>
 </header>
+<div id="settings">
+  <div class="card" id="settings-card">
+    <h2>Cameras</h2><div id="cam-config"></div>
+    <h2 style="margin-top:14px">System</h2>
+    <div class="sysrow">
+      <button id="sys-restart">Restart</button>
+      <button id="sys-update">Update &amp; restart</button>
+      <button id="sys-shutdown">Shut down</button>
+    </div>
+    <div class="ev" id="settings-msg"></div>
+  </div>
+</div>
 <main>
   <div id="view-wrap">
     <img id="stream" alt="" style="display:none">
@@ -778,6 +807,82 @@ canvas.addEventListener("click", (ev) => {
 buildLayerToggles();
 buildTabs();
 tick();
+/* ---------- settings: camera capture modes + system lifecycle ---------- */
+const settings = document.getElementById("settings");
+document.getElementById("gear").onclick = () => {
+  settings.style.display = "flex"; sMsg(""); loadCamConfig();
+};
+settings.addEventListener("click", (e) => {
+  if (e.target === settings) settings.style.display = "none";
+});
+function sMsg(t) { document.getElementById("settings-msg").textContent = t; }
+
+async function loadCamConfig() {
+  const el = document.getElementById("cam-config");
+  el.textContent = "loading…";
+  let cams;
+  try { cams = await (await authFetch("/config/cameras")).json(); }
+  catch (e) { el.textContent = "config unavailable"; return; }
+  el.innerHTML = "";
+  if (!cams.length) el.textContent = "no cameras configured";
+  for (const c of cams) {
+    const cap = c.capture || {}, n = cap.negotiated || {}, req = cap.requested || {};
+    const row = document.createElement("div");
+    row.className = "cam-cfg";
+    row.innerHTML = `<b>${c.sensor_id}</b>
+      <div class="now">delivering ${n.width ?? "?"}x${n.height ?? "?"} @ ${n.fps ?? "?"} fps`
+      + ` (${n.fourcc || "default format"}, ${n.backend || "?"})</div>
+      <div class="fields">
+        <label>device<input name="device" value="${cap.device ?? 0}"></label>
+        <label>width<input name="width" value="${req.width ?? n.width ?? ""}"></label>
+        <label>height<input name="height" value="${req.height ?? n.height ?? ""}"></label>
+        <label>fps<input name="fps" value="${req.fps ?? n.fps ?? ""}"></label>
+        <label>format<select name="fourcc">
+          <option value="MJPG">MJPG</option><option value="YUY2">YUY2</option>
+          <option value="">default</option></select></label>
+        <button>Apply</button>
+      </div>`;
+    row.querySelector("select").value = req.fourcc ?? "MJPG";
+    row.querySelector("button").onclick = async () => {
+      const body = {};
+      for (const f of row.querySelectorAll("input, select")) body[f.name] = f.value;
+      sMsg("applying — the camera re-opens, give it a second…");
+      try {
+        const r = await fetch(`/config/cameras/${encodeURIComponent(c.sensor_id)}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...authHeaders() },
+          body: JSON.stringify(body),
+        });
+        const out = await r.json();
+        if (!r.ok) { sMsg(out.error || "failed"); return; }
+        const got = out.capture.negotiated;
+        sMsg(`camera negotiated ${got.width}x${got.height} @ ${got.fps} fps — saved`);
+        loadCamConfig();
+      } catch (e) { sMsg("no response from tracker"); }
+    };
+    el.appendChild(row);
+  }
+}
+
+async function sysAction(action, confirmText) {
+  if (!confirm(confirmText)) return;
+  sMsg(action + "…");
+  try {
+    const r = await fetch(`/system/${action}`, { method: "POST", headers: authHeaders() });
+    const out = await r.json();
+    if (!r.ok) { sMsg(out.error || "failed"); return; }
+    sMsg(action === "shutdown"
+      ? "tracker stopped — relaunch HomeTwin to start it again"
+      : "restarting — the page reconnects automatically");
+  } catch (e) { sMsg("no response — tracker may already be down"); }
+}
+document.getElementById("sys-restart").onclick = () =>
+  sysAction("restart", "Restart the tracker? State is saved first.");
+document.getElementById("sys-update").onclick = () =>
+  sysAction("update", "Install the latest code from the update channel and restart?");
+document.getElementById("sys-shutdown").onclick = () =>
+  sysAction("shutdown", "Shut the tracker down? Relaunch HomeTwin to start it again.");
+
 setInterval(tick, 1000);
 window.addEventListener("resize", render);
 </script>

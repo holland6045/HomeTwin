@@ -329,11 +329,13 @@ class OpenCVFrameSource:
         if self.fps:
             cap.set(cv2.CAP_PROP_FPS, self.fps)
         fcc = int(cap.get(cv2.CAP_PROP_FOURCC)) & 0xFFFFFFFF
+        fcc_s = "".join(chr((fcc >> 8 * i) & 0xFF) for i in range(4))
         self._negotiated = {
             "width": int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
             "height": int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
             "fps": round(cap.get(cv2.CAP_PROP_FPS), 1),
-            "fourcc": "".join(chr((fcc >> 8 * i) & 0xFF) for i in range(4)).strip("\0 "),
+            # some backends (MSMF) report a numeric format id, not a fourcc
+            "fourcc": fcc_s.strip() if fcc_s.isprintable() else None,
             "backend": cap.getBackendName(),
             "threaded": self.threaded,
         }

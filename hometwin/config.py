@@ -39,6 +39,8 @@ class AppConfig:
     splat_asset: str | None = None  # .splat/.ply scan rendered by the dashboard's 3D tab
     floorplan: dict | None = None  # {image, width_m}: map-view background
     splat_transform: dict | None = None  # aligns the scan to the world frame
+    config_path: str | None = None
+    overrides_path: str | None = None  # dashboard-written settings (JSON)
     raw: dict = field(default_factory=dict)
 
 
@@ -77,13 +79,34 @@ def build_sensor(cfg: dict) -> tuple[SensorAdapter, dict]:
 
 def load_config(path: str | Path) -> AppConfig:
     registry.load_plugins()
+    path = Path(path)
     with open(path, encoding="utf-8") as f:
         raw = yaml.safe_load(f) or {}
+
+    # dashboard-written settings live in a sidecar, so the hand-edited YAML
+    # (and its comments) is never rewritten by the running app
+    overrides_path = path.with_name(path.name + ".overrides.json")
+    overrides = {}
+    if overrides_path.exists():
+        import json
+
+        try:
+            overrides = json.loads(overrides_path.read_text(encoding="utf-8")) or {}
+        except ValueError:
+            overrides = {}
+    sensor_overrides = overrides.get("sensors", {})
+    sensor_cfgs = []
+    for c in raw.get("sensors", []):
+        c = dict(c)
+        ov = sensor_overrides.get(str(c.get("id", c.get("type"))), {})
+        if "source" in ov and isinstance(c.get("source"), dict):
+            c["source"] = {**c["source"], **ov["source"]}
+        sensor_cfgs.append(c)
 
     world_cfg = raw.get("world", {})
     world = World.from_config(world_cfg.get("zones", []), world_cfg.get("spots", []))
     items = ItemRegistry.from_config(raw.get("items", []), raw.get("item_sets", []))
-    built = [build_sensor(c) for c in raw.get("sensors", [])]
+    built = [build_sensor(c) for c in sensor_cfgs]
     sensors = [s for s, _ in built]
 
     device_tags = None
@@ -176,5 +199,7 @@ def load_config(path: str | Path) -> AppConfig:
         floorplan=raw.get("world", {}).get("floorplan"),
         splat_asset=raw.get("world", {}).get("splat_asset"),
         splat_transform=raw.get("world", {}).get("splat_transform"),
+        config_path=str(path),
+        overrides_path=str(overrides_path),
         raw=raw,
     )

@@ -414,3 +414,54 @@ class Tracker:
     def tag_item(self, item_id: str, tag_id: str) -> None:
         with self._lock:
             self.cfg.items.tag_item(item_id, tag_id)
+
+    def reconfigure_camera(self, sensor_id: str, source_cfg: dict) -> dict:
+        """Hot-swap a camera's capture settings (device/resolution/fps) and
+        persist them to the config sidecar so restarts keep them. Returns
+        the newly negotiated mode. Raises KeyError for unknown cameras."""
+        from hometwin import registry
+
+        cam = next((s for s in self.sensors
+                    if getattr(s, "sensor_id", None) == sensor_id
+                    and hasattr(s, "frame_source")), None)
+        if cam is None:
+            raise KeyError(f"unknown camera {sensor_id!r}")
+        old = cam.frame_source
+        merged = {k: getattr(old, k)
+                  for k in ("device", "width", "height", "fps", "fourcc")
+                  if hasattr(old, k)}
+        merged.update(source_cfg)
+        new = registry.create("frame_source", "opencv", **merged)
+        # release the device before the replacement opens it (Windows
+        # capture is exclusive); roll back if the new mode won't open
+        if hasattr(old, "stop"):
+            old.stop()
+        try:
+            new.start()
+        except Exception:
+            if hasattr(old, "start"):
+                old.start()
+            raise
+        cam.frame_source = new
+        self._persist_override(sensor_id, "source", merged)
+        return new.describe()
+
+    def _persist_override(self, sensor_id: str, key: str, value) -> None:
+        path = getattr(self.cfg, "overrides_path", None)
+        if not path:
+            return
+        import json
+        import os
+        from pathlib import Path
+
+        p = Path(path)
+        data = {}
+        if p.exists():
+            try:
+                data = json.loads(p.read_text(encoding="utf-8")) or {}
+            except ValueError:
+                data = {}
+        data.setdefault("sensors", {}).setdefault(sensor_id, {})[key] = value
+        tmp = p.with_name(p.name + ".tmp")
+        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        os.replace(tmp, p)

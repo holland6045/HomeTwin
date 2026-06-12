@@ -16,6 +16,15 @@ GET  /camera/<sensor_id>/stream.mjpg -> live MJPEG stream of captured
 GET  /debug/bundle     -> zip of everything needed to debug remotely:
                           health, overlays, items, events, per-camera
                           state + annotated frames
+GET  /config/cameras   -> capture settings per camera (requested vs
+                          negotiated mode)
+POST /config/cameras/<sensor_id> -> {device?, width?, height?, fps?,
+                          fourcc?} hot-swap capture settings; persisted
+                          to <config>.overrides.json
+POST /system/restart   -> respawn the tracker process (state saved)
+POST /system/update    -> pip-reinstall hometwin from the update channel
+                          (HOMETWIN_REPO/HOMETWIN_CHANNEL env), then respawn
+POST /system/shutdown  -> save state and exit
 POST /items/<id>/tags  -> {"tag": "ble:AA:.."} manual tagging at runtime
 POST /anchors          -> {"tag", "position"} drop a calibration anchor at
                           runtime (map-click coords / board-check output)
@@ -98,6 +107,37 @@ def _version() -> str:
         return version("hometwin")
     except Exception:
         return "unknown"
+
+
+def _exit_process(tracker, server, relaunch: bool) -> None:
+    """Stop everything cleanly, optionally respawn this same command, exit.
+    Runs on its own thread after the HTTP response has been sent."""
+    import shutil
+    import subprocess
+    import sys
+    import time
+
+    time.sleep(0.5)  # let the response reach the client
+    try:
+        tracker.shutdown()
+        time.sleep(2.0)  # run() finally: saves state, releases cameras
+    except Exception:
+        pass
+    try:
+        server.shutdown()
+        server.server_close()  # free the port for the respawned process
+    except Exception:
+        pass
+    if relaunch:
+        exe = sys.argv[0] if os.path.exists(sys.argv[0]) else shutil.which(sys.argv[0])
+        if exe:
+            kwargs = (
+                # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP: survive parent exit
+                {"creationflags": 0x00000208} if os.name == "nt"
+                else {"start_new_session": True}
+            )
+            subprocess.Popen([exe, *sys.argv[1:]], **kwargs)
+    os._exit(0)
 
 
 def make_handler(tracker: Tracker, policy: AuthPolicy):
@@ -209,6 +249,16 @@ def make_handler(tracker: Tracker, policy: AuthPolicy):
             elif len(parts) == 3 and parts[:2] == ["overlay", "camera"]:
                 data = camera_overlay(tracker, parts[2])
                 self._send(200, data) if data else self._send(404, {"error": "unknown camera"})
+            elif parts == ["config", "cameras"]:
+                self._send(200, [
+                    {
+                        "sensor_id": s.sensor_id,
+                        "stream_url": s.stream_url,
+                        "capture": (s.frame_source.describe()
+                                    if hasattr(s.frame_source, "describe") else None),
+                    }
+                    for s in tracker.sensors if hasattr(s, "frame_source")
+                ])
             elif parts == ["items"]:
                 self._send(200, tracker.snapshot())
             elif len(parts) == 2 and parts[0] == "items":
@@ -451,6 +501,34 @@ def make_handler(tracker: Tracker, policy: AuthPolicy):
                     return
                 tracker.add_anchor(tag, position)
                 self._send(200, {"status": "anchored", "tag": tag})
+            elif len(parts) == 3 and parts[:2] == ["config", "cameras"]:
+                length = int(self.headers.get("Content-Length", 0))
+                try:
+                    body = json.loads(self.rfile.read(length) or b"{}")
+                    src = {}
+                    dev = body.get("device", "")
+                    if dev != "" and dev is not None:
+                        src["device"] = int(dev) if str(dev).isdigit() else str(dev)
+                    for k, cast in (("width", int), ("height", int), ("fps", float)):
+                        if body.get(k) not in ("", None):
+                            src[k] = cast(body[k])
+                    if "fourcc" in body:
+                        src["fourcc"] = str(body["fourcc"]).upper() or None
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    self._send(400, {"error": "invalid camera settings"})
+                    return
+                try:
+                    capture = tracker.reconfigure_camera(parts[2], src)
+                except KeyError as e:
+                    self._send(404, {"error": str(e.args[0])})
+                    return
+                except Exception as e:
+                    self._send(500, {"error": f"camera rejected these settings: {e}"})
+                    return
+                self._send(200, {"status": "applied", "capture": capture})
+            elif len(parts) == 2 and parts[0] == "system" and parts[1] in (
+                    "restart", "update", "shutdown"):
+                self._system(parts[1])
             elif len(parts) == 3 and parts[0] == "items" and parts[2] == "tags":
                 length = int(self.headers.get("Content-Length", 0))
                 try:
@@ -465,6 +543,37 @@ def make_handler(tracker: Tracker, policy: AuthPolicy):
                 self._send(200, {"status": "tagged"})
             else:
                 self._send(404, {"error": "not found"})
+
+        def _system(self, action: str) -> None:
+            import subprocess
+            import sys
+
+            if action == "update":
+                repo = os.environ.get("HOMETWIN_REPO")
+                channel = os.environ.get("HOMETWIN_CHANNEL")
+                if not repo or not channel:
+                    self._send(400, {"error": "update channel unknown "
+                                              "(HOMETWIN_REPO/HOMETWIN_CHANNEL unset) — "
+                                              "relaunch the app to update instead"})
+                    return
+                # --no-deps: compiled dependency files are locked while we
+                # run (Windows); the launcher's full reinstall covers
+                # dependency bumps. This path is for code-only updates.
+                proc = subprocess.run(
+                    [sys.executable, "-m", "pip", "install", "--upgrade",
+                     "--force-reinstall", "--no-deps",
+                     f"hometwin @ git+{repo}@{channel}"],
+                    capture_output=True, text=True, timeout=600)
+                if proc.returncode != 0:
+                    self._send(500, {"error": "pip install failed",
+                                     "log": (proc.stdout + proc.stderr)[-2000:]})
+                    return
+            self._send(200, {"status": action})
+            threading.Thread(
+                target=_exit_process,
+                args=(tracker, self.server, action != "shutdown"),
+                daemon=True,
+            ).start()
 
         def log_message(self, *args) -> None:
             pass

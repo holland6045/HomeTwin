@@ -72,7 +72,9 @@ if curl -fsS "http://127.0.0.1:$PORT/health" >/dev/null 2>&1; then
     say "tracker already running"
 else
     say "starting tracker"
-    nohup "$VENV/bin/hometwin" run -c "$CONFIG" >>"$LOG" 2>&1 &
+    # the dashboard's Update button reinstalls from this channel in-process
+    HOMETWIN_REPO="$REPO_URL" HOMETWIN_CHANNEL="$CHANNEL" \
+        nohup "$VENV/bin/hometwin" run -c "$CONFIG" >>"$LOG" 2>&1 &
     echo $! > "$SUPPORT/hometwin.pid"
     for _ in $(seq 1 30); do
         curl -fsS "http://127.0.0.1:$PORT/health" >/dev/null 2>&1 && break

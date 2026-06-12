@@ -107,6 +107,9 @@ if (Healthy) {
     Say "tracker already running"
 } else {
     Say "starting tracker"
+    # the dashboard's Update button reinstalls from this channel in-process
+    $env:HOMETWIN_REPO = $RepoUrl
+    $env:HOMETWIN_CHANNEL = $Channel
     $proc = Start-Process -FilePath (Join-Path $Venv "Scripts\hometwin.exe") `
         -ArgumentList "run", "-c", $Config -WindowStyle Hidden -PassThru `
         -RedirectStandardOutput (Join-Path $Logs "tracker.out.log") `
