@@ -27,7 +27,7 @@ development branch while we iterate, at `main` when things settle.
 2. Double-click **`HomeTwin.bat`**. SmartScreen may warn once; choose
    "More info → Run anyway".
 3. The launcher creates `%LOCALAPPDATA%\HomeTwin\venv`, pip-installs
-   `hometwin[vision]` from the channel branch, writes the default webcam
+   `hometwin[vision,ml]` from the channel branch, writes the default webcam
    config, starts the tracker hidden, and opens the dashboard at
    `http://127.0.0.1:8080/`. First run takes a couple of minutes (OpenCV
    download); later launches are seconds.
@@ -61,6 +61,21 @@ Needs (the launcher checks and tells you if either is missing):
 The CLI from the launcher's venv is the same toolbox as always —
 `webcam-setup`, `make-anchor`, `make-tag`, `snapshot-map` all work
 against the launcher-managed install.
+
+## Enabling person detection (synthetic motion sensors)
+
+The install includes `onnxruntime`; the model is one command:
+
+```
+cd %LOCALAPPDATA%\HomeTwin
+venv\Scripts\hometwin.exe get-model rtdetr
+```
+
+then give a camera in `config.yaml` the detector
+`{type: rtdetr, model_path: models/rtdetr.onnx, conf_threshold: 0.5, interval_s: 0.5}`
+(keep ArUco on another camera entry, or run two camera blocks on the
+same device). Person detections drive any motion zones you draw on the
+map — each appears in Home Assistant as a PIR.
 
 ## Remote debugging without remote access
 

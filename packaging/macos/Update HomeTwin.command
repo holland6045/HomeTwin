@@ -6,7 +6,7 @@ REPO_URL="${HOMETWIN_REPO:-__REPO_URL__}"
 CHANNEL="$(cat "$SUPPORT/channel" 2>/dev/null || echo "__CHANNEL__")"
 echo "updating hometwin from $CHANNEL ..."
 "$SUPPORT/venv/bin/pip" install --upgrade --force-reinstall \
-    "hometwin[vision] @ git+${REPO_URL}@${CHANNEL}"
+    "hometwin[vision,ml] @ git+${REPO_URL}@${CHANNEL}"
 git ls-remote "$REPO_URL" "refs/heads/$CHANNEL" | cut -f1 > "$SUPPORT/installed-commit"
 if [ -f "$SUPPORT/hometwin.pid" ]; then
     kill "$(cat "$SUPPORT/hometwin.pid")" 2>/dev/null || true

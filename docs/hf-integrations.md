@@ -6,11 +6,16 @@ existing accel layer (TensorRT/CUDA/CoreML auto-selection).
 
 ## Priority 1 — RT-DETRv2: better closed-set detector, clean license
 
-**Status: landed.** Plugin `rtdetr` (`hometwin/detectors/rtdetr.py`);
-export weights with `scripts/export_rtdetr.sh`, then
-`detector: {type: rtdetr, model_path: rtdetr_onnx/model.onnx}`.
+**Status: landed, turnkey.** Plugin `rtdetr` (`hometwin/detectors/rtdetr.py`).
+`hometwin get-model rtdetr` downloads the pre-exported ONNX
+(`onnx-community/rtdetr_r18vd`, checksummed; fp16/int8 variants
+available) — no torch/optimum toolchain. Then:
+`detector: {type: rtdetr, model_path: models/rtdetr.onnx, interval_s: 0.5}`.
 Person detections route into motion zones via `tracker.presence_labels`
-(default `[person]`) — synthetic PIRs now work from a webcam alone.
+(default `[person]`) — synthetic PIRs work from a webcam alone.
+Validated end-to-end on a real low-light webcam frame (person @ 0.93,
+0.22 s/frame on CPU). `scripts/export_rtdetr.sh` remains the path to
+the v2 weights if the accuracy bump is ever wanted.
 
 - `PekingU/rtdetr_v2_r50vd` / `r18vd` (Apache-2.0, COCO-trained,
   450K/92K downloads). NMS-free transformer detector, exports to ONNX

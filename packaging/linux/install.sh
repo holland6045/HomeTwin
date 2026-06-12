@@ -77,6 +77,8 @@ After=network-online.target
 # the dashboard's Update button reinstalls from this channel in-process
 Environment=HOMETWIN_REPO=${REPO_URL}
 Environment=HOMETWIN_CHANNEL=${CHANNEL}
+# relative config paths (state, models/) resolve here
+WorkingDirectory=${APP}
 ExecStart=${VENV}/bin/hometwin run -c ${CONF_DIR}/config.yaml
 # dashboard Restart/Update exits the process; systemd brings it back up
 Restart=always

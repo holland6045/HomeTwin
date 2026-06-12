@@ -8,7 +8,7 @@ $Channel = if (Test-Path $ChannelFile) { (Get-Content $ChannelFile -Raw).Trim() 
 
 Write-Host "updating hometwin from $Channel ..."
 & (Join-Path $Support "venv\Scripts\python.exe") -m pip install --upgrade --force-reinstall `
-    "hometwin[vision] @ git+$RepoUrl@$Channel"
+    "hometwin[vision,ml] @ git+$RepoUrl@$Channel"
 if ($LASTEXITCODE -ne 0) { Write-Error "pip install failed"; exit 1 }
 
 $line = git ls-remote $RepoUrl "refs/heads/$Channel" | Select-Object -First 1

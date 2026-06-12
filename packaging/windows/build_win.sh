@@ -7,7 +7,7 @@
 #
 # Same thin-launcher model as HomeTwin.app: double-clicking HomeTwin.bat
 # creates a venv under %LOCALAPPDATA%\HomeTwin, pip-installs
-# hometwin[vision] from REPO_URL@CHANNEL, and self-updates whenever the
+# hometwin[vision,ml] from REPO_URL@CHANNEL, and self-updates whenever the
 # channel branch moves (disable: echo false > %LOCALAPPDATA%\HomeTwin\autoupdate).
 # Runs anywhere bash does, so CI can verify the package; only Windows can
 # run the result.

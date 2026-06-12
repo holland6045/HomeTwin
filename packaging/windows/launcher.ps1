@@ -54,7 +54,7 @@ function Remote-Commit {
 function Install-Update($target) {
     Say "installing hometwin@$Channel ($target)"
     & (Join-Path $Venv "Scripts\python.exe") -m pip install --quiet --upgrade --force-reinstall `
-        "hometwin[vision] @ git+$RepoUrl@$Channel" *>> $Log
+        "hometwin[vision,ml] @ git+$RepoUrl@$Channel" *>> $Log
     if ($LASTEXITCODE -ne 0) { throw "pip install failed - see $Log" }
     Set-Content (Join-Path $Support "installed-commit") $target
 }
@@ -110,7 +110,9 @@ if (Healthy) {
     # the dashboard's Update button reinstalls from this channel in-process
     $env:HOMETWIN_REPO = $RepoUrl
     $env:HOMETWIN_CHANNEL = $Channel
+    # fixed cwd: relative config paths (state, models/) resolve here
     $proc = Start-Process -FilePath (Join-Path $Venv "Scripts\hometwin.exe") `
+        -WorkingDirectory $Support `
         -ArgumentList "run", "-c", $Config -WindowStyle Hidden -PassThru `
         -RedirectStandardOutput (Join-Path $Logs "tracker.out.log") `
         -RedirectStandardError (Join-Path $Logs "tracker.err.log")

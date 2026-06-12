@@ -8,6 +8,7 @@ import logging
 import os
 import sys
 import urllib.request
+from pathlib import Path
 
 TOKEN_ENV = "HOMETWIN_TOKEN"
 
@@ -388,6 +389,71 @@ def cmd_webcam_probe(args) -> int:
     return 0
 
 
+MODEL_ZOO = {
+    # pre-exported ONNX, no torch/optimum toolchain needed. RT-DETR r18vd
+    # is Apache-2.0 (PekingU), COCO classes; layout matches the rtdetr
+    # detector plugin. Variants trade accuracy for size/speed.
+    "rtdetr": {
+        "repo": "onnx-community/rtdetr_r18vd",
+        "files": {
+            "fp32": ("onnx/model.onnx",
+                     "11843b02455cc24009aed24d4c40db721b1093be5ccd6bbe7b9c441abb1d0558"),
+            "fp16": ("onnx/model_fp16.onnx", None),
+            "int8": ("onnx/model_int8.onnx", None),
+            "quantized": ("onnx/model_quantized.onnx", None),
+        },
+    },
+}
+
+
+def cmd_get_model(args) -> int:
+    """Download a known-good detection model — turnkey person detection.
+
+    After download, point a camera at it and presence-class detections
+    flow into motion zones (tracker.presence_labels defaults to person).
+    """
+    import hashlib
+    import urllib.request
+
+    entry = MODEL_ZOO.get(args.model)
+    if entry is None:
+        print(f"unknown model {args.model!r}; available: {', '.join(MODEL_ZOO)}",
+              file=sys.stderr)
+        return 1
+    if args.variant not in entry["files"]:
+        print(f"unknown variant {args.variant!r}; available: "
+              f"{', '.join(entry['files'])}", file=sys.stderr)
+        return 1
+    remote, sha = entry["files"][args.variant]
+    url = f"https://huggingface.co/{entry['repo']}/resolve/main/{remote}"
+    out = Path(args.output or f"models/{args.model}.onnx")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    tmp = out.with_suffix(out.suffix + ".part")
+
+    print(f"downloading {entry['repo']} [{args.variant}] ...", file=sys.stderr)
+    digest = hashlib.sha256()
+    with urllib.request.urlopen(url, timeout=60) as r, open(tmp, "wb") as f:
+        done = 0
+        while chunk := r.read(1 << 20):
+            f.write(chunk)
+            digest.update(chunk)
+            done += len(chunk)
+            print(f"\r  {done / 1e6:.0f} MB", end="", file=sys.stderr)
+    print(file=sys.stderr)
+    if sha and digest.hexdigest() != sha:
+        tmp.unlink(missing_ok=True)
+        print(f"checksum mismatch — refusing the file (got {digest.hexdigest()})",
+              file=sys.stderr)
+        return 1
+    tmp.replace(out)
+    print(f"saved {out}", file=sys.stderr)
+    print(f"""
+# add to a camera in your config (interval_s throttles CPU inference):
+#     detector: {{type: rtdetr, model_path: {out.as_posix()}, conf_threshold: 0.5, interval_s: 0.5}}
+# person detections then drive motion zones + presence automatically.""")
+    return 0
+
+
 def cmd_board_check(args) -> int:
     """Precision instrument: a calibrated camera measures the board.
 
@@ -689,6 +755,14 @@ def main(argv: list[str] | None = None) -> int:
     webp.add_argument("--seconds", type=int, default=15)
     webp.add_argument("--dictionary", default="DICT_4X4_250")
     webp.set_defaults(fn=cmd_webcam_test)
+
+    getm = sub.add_parser("get-model",
+                          help="download a known-good ONNX detector (person detection)")
+    getm.add_argument("model", choices=sorted(MODEL_ZOO), help="model name")
+    getm.add_argument("--variant", default="fp32",
+                      help="fp32 (default, checksummed) | fp16 | int8 | quantized")
+    getm.add_argument("-o", "--output", help="output path (default models/<name>.onnx)")
+    getm.set_defaults(fn=cmd_get_model)
 
     probp = sub.add_parser("webcam-probe",
                            help="find the camera's best capture mode (resolution/fps)")

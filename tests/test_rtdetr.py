@@ -129,3 +129,44 @@ def test_non_presence_labels_unaffected():
                                 items=ItemRegistry(), sensors=[cam]))
     tracker.step()
     assert tracker.presence is None  # a chair is not an occupant
+
+
+def test_interval_throttle_skips_between_inferences():
+    det = RTDetrDetector(session=FakeSession([("person", 0.9, (0.5, 0.5, 0.2, 0.4))]),
+                         interval_s=60.0)
+    frame = np.zeros((48, 64, 3), dtype=np.uint8)
+    assert [d.label for d in det.detect(frame)] == ["person"]
+    assert det.detect(frame) == []  # within the interval: no inference
+    det._last_run -= 61.0  # interval elapsed
+    assert [d.label for d in det.detect(frame)] == ["person"]
+
+
+def test_get_model_download_and_checksum(tmp_path, monkeypatch):
+    import io
+    from types import SimpleNamespace
+
+    import hometwin.cli as cli
+
+    payload = b"fake-onnx-bytes"
+
+    class FakeResp(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(cli.urllib.request, "urlopen",
+                        lambda url, timeout=60: FakeResp(payload))
+    # un-pinned variant: accepted as-is
+    args = SimpleNamespace(model="rtdetr", variant="fp16", output=str(tmp_path / "m.onnx"))
+    assert cli.cmd_get_model(args) == 0
+    assert (tmp_path / "m.onnx").read_bytes() == payload
+    # pinned fp32: wrong bytes are refused and nothing is left behind
+    args = SimpleNamespace(model="rtdetr", variant="fp32", output=str(tmp_path / "m2.onnx"))
+    assert cli.cmd_get_model(args) == 1
+    assert not (tmp_path / "m2.onnx").exists()
+    assert not (tmp_path / "m2.onnx.part").exists()
+    # unknown names fail cleanly
+    assert cli.cmd_get_model(SimpleNamespace(model="nope", variant="fp32", output=None)) == 1
+    assert cli.cmd_get_model(SimpleNamespace(model="rtdetr", variant="nope", output=None)) == 1

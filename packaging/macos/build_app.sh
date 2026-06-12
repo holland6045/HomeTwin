@@ -6,7 +6,7 @@
 #   packaging/macos/build_app.sh
 #
 # The bundle is a thin launcher: on first open it creates a venv under
-# ~/Library/Application Support/HomeTwin and pip-installs hometwin[vision]
+# ~/Library/Application Support/HomeTwin and pip-installs hometwin[vision,ml]
 # from REPO_URL@CHANNEL; on every open it self-updates when the channel
 # branch has new commits (disable: echo false > '~/Library/Application
 # Support/HomeTwin/autoupdate'). Runs anywhere bash does, so CI can verify

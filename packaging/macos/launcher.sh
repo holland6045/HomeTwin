@@ -38,7 +38,7 @@ install_or_update() {
     local target="$1"
     say "installing hometwin@$CHANNEL ($target)"
     "$VENV/bin/pip" install --quiet --upgrade --force-reinstall \
-        "hometwin[vision] @ git+${REPO_URL}@${CHANNEL}" >>"$LOG" 2>&1
+        "hometwin[vision,ml] @ git+${REPO_URL}@${CHANNEL}" >>"$LOG" 2>&1
     echo "$target" > "$SUPPORT/installed-commit"
 }
 
@@ -72,7 +72,9 @@ if curl -fsS "http://127.0.0.1:$PORT/health" >/dev/null 2>&1; then
     say "tracker already running"
 else
     say "starting tracker"
-    # the dashboard's Update button reinstalls from this channel in-process
+    # fixed cwd: relative config paths (state, models/) resolve here.
+    # The Update button env tells the tracker where to reinstall from.
+    cd "$SUPPORT"
     HOMETWIN_REPO="$REPO_URL" HOMETWIN_CHANNEL="$CHANNEL" \
         nohup "$VENV/bin/hometwin" run -c "$CONFIG" >>"$LOG" 2>&1 &
     echo $! > "$SUPPORT/hometwin.pid"

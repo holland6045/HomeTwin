@@ -24,7 +24,7 @@ branch while we iterate, at `main` when things settle.
 2. **Right-click → Open** the first time (ad-hoc signature; Gatekeeper
    asks once).
 3. The launcher creates `~/Library/Application Support/HomeTwin/venv`,
-   pip-installs `hometwin[vision]` from the channel branch, writes the
+   pip-installs `hometwin[vision,ml]` from the channel branch, writes the
    default webcam config, starts the tracker, and opens the dashboard.
    First run takes a couple of minutes (OpenCV download); later launches
    are seconds.

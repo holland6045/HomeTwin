@@ -50,6 +50,10 @@ class RTDetrDetector(Detector):
         input_size: int = 640,
         conf_threshold: float = 0.4,
         max_detections: int = 50,
+        # min seconds between inferences; throttled frames return no
+        # detections (presence off-delays smooth the gaps). Transformer
+        # inference is ~100x an ArUco pass — throttle when on CPU.
+        interval_s: float = 0.0,
         session=None,  # injectable for tests
     ):
         try:
@@ -75,6 +79,8 @@ class RTDetrDetector(Detector):
         self.input_size = input_size
         self.conf = conf_threshold
         self.max_detections = max_detections
+        self.interval_s = interval_s
+        self._last_run = float("-inf")
 
     def _preprocess(self, frame):
         np = self._np
@@ -125,6 +131,13 @@ class RTDetrDetector(Detector):
         return out
 
     def detect(self, frame) -> list[Detection]:
+        if self.interval_s > 0.0:
+            import time
+
+            now = time.monotonic()
+            if now - self._last_run < self.interval_s:
+                return []
+            self._last_run = now
         outputs = self.session.run(None, self._feeds(self._preprocess(frame)))
         logits, boxes = outputs[0][0], outputs[1][0]
         # some exports order (boxes, logits): logits have the class dim
