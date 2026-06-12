@@ -46,6 +46,7 @@
   <aside>
     <div class="card"><h2>Items</h2><div id="item-list"></div></div>
     <div class="card"><h2>Events</h2><div id="event-list"></div></div>
+    <div class="card"><a id="diag" href="/debug/bundle" download>Download diagnostics</a></div>
   </aside>
 </main>
 <script>
@@ -97,6 +98,8 @@ function assetUrl(path) {
   const t = localStorage.getItem("api_token");
   return t ? `${path}?token=${encodeURIComponent(t)}` : path;
 }
+document.getElementById("diag").href = assetUrl("/debug/bundle");
+stream.onerror = () => { stream.style.display = "none"; };  // no frame yet: retry next tick
 function itemColor(d, itemId) {
   const ids = (d.items || []).map(i => i.item_id);
   return ITEM_COLORS[Math.max(ids.indexOf(itemId), 0) % ITEM_COLORS.length];
@@ -714,7 +717,12 @@ async function tick() {
       stream.style.display = "none";
     } else {
       if (d.stream_url) { stream.src = d.stream_url; stream.style.display = "block"; }
-      else stream.style.display = "none";
+      else {
+        // no external stream: poll the tracker's own latest-frame endpoint
+        const base = assetUrl(`/camera/${encodeURIComponent(state.view)}/frame.jpg`);
+        stream.src = base + (base.includes("?") ? "&" : "?") + "t=" + Date.now();
+        stream.style.display = "block";
+      }
       const map = await (await authFetch("/overlay/map")).json();
       renderPanel(map.items, map.events);
     }

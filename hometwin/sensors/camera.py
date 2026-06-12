@@ -141,6 +141,12 @@ class CameraSensor(SensorAdapter):
         self.movables = None
         self.device_tags = None
         self._soft_refs: dict[str, tuple[tuple, float]] = {}
+        # latest capture, kept for /camera/<id>/frame.jpg and diagnostics.
+        # Plain reference swaps — readers on other threads get a coherent
+        # (frame, ts, detections) at worst one poll stale.
+        self.last_frame = None
+        self.last_frame_ts = 0.0
+        self.last_detections: list[Detection] = []
 
     def _ensure_calibrator(self):
         if self.calibrator is None:
@@ -229,8 +235,10 @@ class CameraSensor(SensorAdapter):
         if frame is None:
             return []
         ts = self.clock()
+        dets = self.detector.detect(frame)
+        self.last_frame, self.last_frame_ts, self.last_detections = frame, ts, dets
         out = []
-        for det in self.detector.detect(frame):
+        for det in dets:
             if self.movables and det.tag_id and self.movables.observe_ray(
                 det.tag_id, self.geometry.position, self.geometry.ray(*det.center), ts
             ):

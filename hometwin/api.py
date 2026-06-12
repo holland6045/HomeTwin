@@ -8,6 +8,12 @@ GET  /presence         -> latest occupancy estimate (tomography etc.)
 GET  /events           -> recent zone-change events, oldest first
 GET  /overlay/map      -> world-space layers for the top-down map view
 GET  /overlay/camera/<sensor_id> -> same layers projected into camera pixels
+GET  /camera/<sensor_id>/frame.jpg -> latest captured frame (?annotate=1
+                          draws detection boxes) — the dashboard's camera
+                          view when no external stream_url is configured
+GET  /debug/bundle     -> zip of everything needed to debug remotely:
+                          health, overlays, items, events, per-camera
+                          state + annotated frames
 POST /items/<id>/tags  -> {"tag": "ble:AA:.."} manual tagging at runtime
 POST /anchors          -> {"tag", "position"} drop a calibration anchor at
                           runtime (map-click coords / board-check output)
@@ -65,6 +71,31 @@ class AuthPolicy:
 
 def _ui_html() -> bytes:
     return (resources.files("hometwin") / "static" / "ui.html").read_bytes()
+
+
+def _annotate(frame, detections):
+    import cv2
+
+    img = frame.copy()
+    h, w = img.shape[:2]
+    for det in detections:
+        x, y, bw, bh = det.bbox
+        p1 = (int(x * w), int(y * h))
+        p2 = (int((x + bw) * w), int((y + bh) * h))
+        cv2.rectangle(img, p1, p2, (80, 220, 80), 2)
+        text = f"{det.tag_id or det.label} {det.confidence:.2f}"
+        cv2.putText(img, text, (p1[0], max(p1[1] - 6, 12)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (80, 220, 80), 1, cv2.LINE_AA)
+    return img
+
+
+def _version() -> str:
+    try:
+        from importlib.metadata import version
+
+        return version("hometwin")
+    except Exception:
+        return "unknown"
 
 
 def make_handler(tracker: Tracker, policy: AuthPolicy):
@@ -165,6 +196,10 @@ def make_handler(tracker: Tracker, policy: AuthPolicy):
                     **wm.stats(),
                     "points": wm.point_cloud(),
                 })
+            elif len(parts) == 3 and parts[0] == "camera" and parts[2] == "frame.jpg":
+                self._frame_jpg(parts[1])
+            elif parts == ["debug", "bundle"]:
+                self._debug_bundle()
             elif parts == ["overlay", "map"]:
                 self._send(200, map_overlay(tracker))
             elif len(parts) == 3 and parts[:2] == ["overlay", "camera"]:
@@ -181,6 +216,106 @@ def make_handler(tracker: Tracker, policy: AuthPolicy):
                 self._send(200, list(tracker.events))
             else:
                 self._send(404, {"error": "not found"})
+
+        def _send_bytes(self, body: bytes, ctype: str, disposition: str | None = None) -> None:
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Cache-Control", "no-store")
+            if disposition:
+                self.send_header("Content-Disposition", disposition)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def _frame_jpg(self, sensor_id: str) -> None:
+            cam = next((s for s in tracker.sensors
+                        if getattr(s, "sensor_id", None) == sensor_id
+                        and hasattr(s, "last_frame")), None)
+            if cam is None:
+                self._send(404, {"error": "unknown camera"})
+                return
+            frame = cam.last_frame
+            if frame is None:
+                self._send(404, {"error": "no frame captured yet"})
+                return
+            try:
+                import cv2
+            except ImportError:
+                self._send(503, {"error": "opencv not installed"})
+                return
+            qs = parse_qs(urlsplit(self.path).query)
+            if qs.get("annotate", ["0"])[0] not in ("0", "", "false"):
+                frame = _annotate(frame, cam.last_detections)
+            ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+            if not ok:
+                self._send(500, {"error": "JPEG encode failed"})
+                return
+            self._send_bytes(buf.tobytes(), "image/jpeg")
+
+        def _debug_bundle(self) -> None:
+            """Everything needed to debug a live install from one zip,
+            without remote access: state snapshots + annotated frames.
+            Every section is best-effort — a broken subsystem becomes an
+            .error.txt entry instead of killing the bundle."""
+            import io
+            import platform
+            import sys
+            import time
+            import zipfile
+            from dataclasses import asdict
+
+            from hometwin.accel import capabilities
+
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+                def add_json(name, build):
+                    try:
+                        z.writestr(name, json.dumps(build(), indent=2, default=str))
+                    except Exception as e:
+                        z.writestr(name + ".error.txt", repr(e))
+
+                add_json("health.json", lambda: {
+                    "time": time.time(),
+                    "version": _version(),
+                    "python": sys.version,
+                    "platform": platform.platform(),
+                    "sensors": [
+                        {"id": getattr(s, "sensor_id", None), "type": type(s).__name__}
+                        for s in tracker.sensors
+                    ],
+                    "accel": capabilities(),
+                })
+                add_json("overlay_map.json", lambda: map_overlay(tracker))
+                add_json("items.json", tracker.snapshot)
+                add_json("events.json", lambda: list(tracker.events))
+                add_json("presence.json", lambda: tracker.presence)
+                for s in tracker.sensors:
+                    sid = getattr(s, "sensor_id", None)
+                    if sid is None or not hasattr(s, "last_frame"):
+                        continue
+                    frame = s.last_frame
+                    add_json(f"camera_{sid}.json", lambda s=s, frame=frame: {
+                        "has_frame": frame is not None,
+                        "frame_shape": getattr(frame, "shape", None),
+                        "last_frame_ts": s.last_frame_ts,
+                        "stream_url": s.stream_url,
+                        "detections": [asdict(d) for d in s.last_detections],
+                        "overlay": camera_overlay(tracker, sid),
+                    })
+                    if frame is None:
+                        continue
+                    try:
+                        import cv2
+
+                        ok, jb = cv2.imencode(".jpg", _annotate(frame, s.last_detections))
+                        if ok:
+                            z.writestr(f"camera_{sid}.jpg", jb.tobytes())
+                    except Exception as e:
+                        z.writestr(f"camera_{sid}.jpg.error.txt", repr(e))
+            self._send_bytes(
+                buf.getvalue(), "application/zip",
+                f'attachment; filename="hometwin-diag-{int(time.time())}.zip"',
+            )
 
         def do_POST(self) -> None:
             parts = [unquote(p) for p in self.path.split("?")[0].split("/") if p]

@@ -62,6 +62,15 @@ The CLI from the launcher's venv is the same toolbox as always —
 `webcam-setup`, `make-anchor`, `make-tag`, `snapshot-map` all work
 against the launcher-managed install.
 
+## Remote debugging without remote access
+
+The dashboard sidebar has a **Download diagnostics** link
+(`/debug/bundle`): one zip with health/version info, overlay and item
+state, per-camera detection state, and the latest annotated frame from
+every camera. When something misbehaves, grab the bundle and hand it to
+whoever is debugging — it answers "what does the tracker think is
+happening" without anyone needing access to the machine.
+
 ## Troubleshooting
 
 - Window flashes and closes / "does nothing": run `HomeTwin Logs.bat`;
