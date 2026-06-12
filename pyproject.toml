@@ -12,6 +12,9 @@ dependencies = ["PyYAML>=6.0"]
 [project.optional-dependencies]
 vision = ["opencv-contrib-python>=4.8", "numpy>=1.24"]
 ml = ["onnxruntime>=1.16", "numpy>=1.24"]
+# NVIDIA GPU inference (the NUC + 4060 Ti coordinator): CUDA/TensorRT
+# providers are auto-selected by hometwin.accel when this is installed
+ml-cuda = ["onnxruntime-gpu>=1.16", "numpy>=1.24"]
 dev = ["pytest>=7.0"]
 
 [project.scripts]

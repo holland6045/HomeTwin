@@ -93,3 +93,16 @@ def test_build_win_produces_valid_package(tmp_path):
                 "if($e){Write-Error ($e -join \"`n\");exit 1}"
             )
             subprocess.run([pwsh, "-NoProfile", "-Command", check], check=True)
+
+
+def test_linux_install_script_sanity():
+    script = ROOT / "packaging/linux/install.sh"
+    subprocess.run(["bash", "-n", str(script)], check=True)
+    text = script.read_text()
+    # the systemd unit must carry the update channel for the dashboard's
+    # Update button, and restart the service when lifecycle buttons exit it
+    assert "Environment=HOMETWIN_REPO=" in text
+    assert "Environment=HOMETWIN_CHANNEL=" in text
+    assert "Restart=always" in text
+    assert "enable-linger" in text  # headless server: survive logout
+    assert "ml-cuda" in text  # GPU install path

@@ -310,6 +310,15 @@ assembles an unzip-anywhere folder whose `HomeTwin.bat` owns a venv under
 `%LOCALAPPDATA%\HomeTwin` and self-updates from the channel branch on
 every launch. Details: `docs/windows-app.md`.
 
+## On the Linux server: central coordinator
+
+The full-time deployment (headless NUC, optional NVIDIA GPU for ONNX
+inference): `packaging/linux/install.sh` sets up a venv, a systemd user
+service with `Restart=always` (the dashboard's Restart/Update buttons
+just exit the process), and lingering so it survives reboots unattended.
+`HOMETWIN_GPU=1` installs `onnxruntime-gpu`; the accel layer picks up
+CUDA/TensorRT automatically. Details: `docs/linux-server.md`.
+
 ## Repository layout
 
 ```
