@@ -93,6 +93,7 @@ const LAYERS = [
   ["worldmodel", "World model", true],
   ["motion", "Motion zones", true],
   ["items", "Items", true],
+  ["people", "People", true],
   ["presence", "Presence", true],
 ];
 const ITEM_COLORS = ["#4ea1ff", "#ff7eb6", "#66d98c", "#c9a227", "#8a7dff", "#ff9d5c"];
@@ -276,6 +277,25 @@ function renderMap(d) {
     ctx.fillStyle = "#8a7dff"; ctx.fillText("presence", px + 6, py);
   }
 
+  if (on("people")) for (const p of (d.people || [])) {
+    const pts = (p.trail || []).map(q => T(q));
+    for (let i = 1; i < pts.length; i++) {
+      ctx.strokeStyle = "#ff5c8a";
+      ctx.globalAlpha = 0.1 + 0.5 * (i / pts.length); ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(pts[i - 1][0], pts[i - 1][1]);
+      ctx.lineTo(pts[i][0], pts[i][1]); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    const [px, py] = T(p.position);
+    ctx.fillStyle = "#ff5c8a";
+    ctx.beginPath(); ctx.arc(px, py, 6, 0, 7); ctx.fill();
+    // velocity arrow
+    const [ex, ey] = T([p.position[0] + p.velocity[0], p.position[1] + p.velocity[1]]);
+    ctx.strokeStyle = "#ff5c8a"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(ex, ey); ctx.stroke();
+    ctx.fillStyle = "#ffb3c9"; ctx.fillText(p.id, px + 8, py - 6);
+  }
+
   if (on("movables")) for (const m of (d.movables || [])) {
     const pts = m.path.map(p => T(p));
     ctx.strokeStyle = "#39414e"; ctx.lineWidth = 2;
@@ -371,6 +391,16 @@ function renderCamera(d) {
     ctx.fillStyle = "rgba(138,125,255,0.3)";
     ctx.beginPath(); ctx.arc(x, y, 30, 0, 7); ctx.fill();
     ctx.fillStyle = "#8a7dff"; ctx.fillText("presence", x + 8, y);
+  }
+
+  if (on("people")) for (const p of (d.people || [])) {
+    for (const seg of (p.trail || [])) drawSeg(seg, "rgba(255,92,138,0.6)", 2, P);
+    if (p.u === undefined || p.u < 0 || p.u > 1 || p.v < 0 || p.v > 1) continue;
+    const [x, y] = P([p.u, p.v]);
+    ctx.strokeStyle = "#ff5c8a"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(x, y, 26, 0, 7); ctx.stroke();
+    ctx.fillStyle = "#ffb3c9"; ctx.font = "13px system-ui";
+    ctx.fillText(p.id, x + 10, y - 8);
   }
 
   if (on("items")) for (const it of d.items) {
@@ -686,6 +716,11 @@ function renderPanel(items, events) {
       const n = document.createElement("span");
       n.className = "never"; n.textContent = "never seen";
       where.append(n);
+    } else if (it.maybe_carried_by) {
+      const place = document.createElement("span");
+      place.className = "zone-name";
+      place.textContent = `carried by ${it.maybe_carried_by} → ${it.likely_zone || "?"}`;
+      where.append(place);
     } else {
       const place = document.createElement("span");
       place.className = "zone-name";

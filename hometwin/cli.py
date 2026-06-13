@@ -48,6 +48,13 @@ def cmd_where(args) -> int:
         return 1
     if entry.get("status") == "never_seen":
         print(f"{entry['name']}: never seen")
+    elif entry.get("maybe_carried_by"):
+        where = entry.get("likely_zone") or "an unknown spot"
+        pos = entry.get("likely_position")
+        at = f" near ({pos[0]}, {pos[1]}, {pos[2]})" if pos else ""
+        last = entry.get("zone") or "?"
+        print(f"{entry['name']}: likely carried by {entry['maybe_carried_by']} "
+              f"to {where}{at} (last seen itself in {last})")
     else:
         zone = entry.get("spot") or entry.get("zone") or "outside known zones"
         if entry.get("maybe_in"):

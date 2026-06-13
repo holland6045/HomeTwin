@@ -30,6 +30,15 @@ log = logging.getLogger("hometwin")
 EVENT_HISTORY = 500
 TRAIL_LENGTH = 200
 TRAIL_MIN_STEP_M = 0.15
+# person-mediated relocation inference: the drawer-stow logic generalized
+# to a mobile carrier. A person within REACH_M of an item is "in contact";
+# if the item then goes quiet (tag pocketed / object occluded in a hand)
+# right after such contact, the item is presumed carried, and its likely
+# location follows the carrier until they settle (drop it) or are lost.
+REACH_M = 0.8
+PICKUP_QUIET_S = 3.0          # item unseen this long, just after contact => carried
+CARRY_SETTLE_SPEED = 0.15     # carrier slower than this (m/s) is setting it down
+CARRY_MAX_AGE_S = 1800.0      # abandon a carry hypothesis after this
 # soft-reference qualification: a tag teaches a camera only when its fused
 # estimate is tight, stationary, and substantially owed to OTHER sensors
 SOFT_REF_MAX_SIGMA_M = 0.2
@@ -43,10 +52,16 @@ class Tracker:
         self.engine = FusionEngine(cfg.items, cfg.world, stale_after_s=cfg.stale_after_s)
         self.sensors = cfg.sensors
         self.presence: dict | None = None
+        self.people: list[dict] = []  # tracked occupants (snapshot of engine.people)
         self.events: deque[dict] = deque(maxlen=EVENT_HISTORY)
         self.last_ranges: dict[tuple[str, str], dict] = {}  # (sensor, item) -> last range
         self.last_bearings: dict[tuple[str, str], dict] = {}  # (sensor, item) -> last ray
         self.trails: dict[str, deque] = {}  # item -> recent path points
+        self.people_trails: dict[str, deque] = {}  # person -> recent path points
+        # relocation inference state
+        self._carries: dict[str, dict] = {}          # item_id -> carry hypothesis
+        self._contact: dict[str, tuple[str, float]] = {}  # item_id -> (person, ts) last in reach
+        self._person_last_seen: dict[str, dict] = {}  # person -> {pos, ts, zone}, kept past prune
         self._zones: dict[str, str | None] = {}
         self._wm_movable_seen: dict[str, tuple] = {}
         self._stop = threading.Event()
@@ -179,22 +194,25 @@ class Tracker:
                         "timestamp": obs.timestamp,
                     }
                 elif (
-                    isinstance(obs, PositionObservation)
+                    isinstance(obs, (PositionObservation, BearingObservation))
+                    and not obs.item_id
                     and obs.label in self.cfg.presence_labels
                 ):
-                    # camera person-detections that map to no item are
-                    # occupancy: they drive motion zones, the presence
-                    # display, and the world model — synthetic PIRs work
-                    # from a webcam alone
-                    self.worldmodel.add_point(obs.position, obs.timestamp, weight=0.3)
-                    self._motion_evidence(obs.position, obs.timestamp, obs.sigma_m)
-                    self.presence = {
-                        "sensor_id": obs.sensor_id,
-                        "centroid": list(obs.position),
-                        "sigma_m": obs.sigma_m,
-                        "zone": self.cfg.world.locate(obs.position),
-                        "timestamp": obs.timestamp,
-                    }
+                    # occupant detection: tracked through the same estimator
+                    # as items but in the people registry — smoothed
+                    # position+velocity, multi-person association. Motion
+                    # zones and the world model get the filtered position,
+                    # not the raw jittery detection.
+                    with self._lock:
+                        pid = self.engine.ingest_presence(obs)
+                    if pid:
+                        track = self.engine.people[pid]
+                        p = track.position
+                        self.worldmodel.add_point(p, obs.timestamp, weight=0.3)
+                        self._motion_evidence(p, obs.timestamp, track.sigma_m)
+                        self._record_person_trail(pid, p, obs.timestamp)
+                        self._presence_clock = max(
+                            getattr(self, "_presence_clock", 0.0), obs.timestamp)
         self._record_zone_changes(touched)
         if self.cfg.movables is not None:
             for event in self.cfg.movables.events:
@@ -218,8 +236,20 @@ class Tracker:
         from hometwin.learning import collect_ble_samples
 
         collect_ble_samples(self)
+        now = self._evidence_now()
+        self._refresh_presence(now)
+        self._infer_relocations(now)
         self._expire_motion_zones()
         return count
+
+    def _evidence_now(self) -> float:
+        """Clock for live-vs-replay decay decisions: wall time normally, but
+        the newest evidence timestamp when that is far in the past (sim or
+        replay) so synthetic runs stay deterministic."""
+        clock = max(getattr(self, "_motion_clock", 0.0),
+                    getattr(self, "_presence_clock", 0.0))
+        wall = time.time()
+        return wall if (clock == 0.0 or wall - clock < 3600.0) else clock
 
     def _motion_evidence(self, p, ts: float, sigma_m: float = 0.0) -> None:
         mz = self.cfg.motion_zones
@@ -315,6 +345,103 @@ class Tracker:
                 )
             self._zones[item_id] = (zone, spot)
 
+    def _record_person_trail(self, pid: str, pos, ts: float) -> None:
+        trail = self.people_trails.setdefault(pid, deque(maxlen=TRAIL_LENGTH))
+        if not trail or math.dist(trail[-1]["pos"], pos) >= TRAIL_MIN_STEP_M:
+            trail.append({"t": ts, "pos": list(pos)})
+
+    def _refresh_presence(self, now: float) -> None:
+        """Age out departed occupants, publish the current set, and keep a
+        last-known fix for each (retained past pruning so a relocation
+        hypothesis can freeze to where its carrier was last seen)."""
+        with self._lock:
+            for pid, tr in self.engine.people.items():
+                self._person_last_seen[pid] = {
+                    "pos": list(tr.position), "ts": tr.last_update,
+                    "zone": self.cfg.world.locate(tr.position),
+                }
+            dropped = self.engine.prune_people(now, self.cfg.presence_stale_after_s)
+            people = self.engine.people_snapshot(now)
+            for pid in dropped:
+                self.people_trails.pop(pid, None)
+        self.people = people
+        if people:
+            # the longest-observed occupant fronts the legacy presence dot
+            primary = max(people, key=lambda p: p["observations"])
+            self.presence = {
+                "sensor_id": primary["last_sensor"],
+                "centroid": primary["position"],
+                "sigma_m": primary["sigma_m"],
+                "zone": primary["zone"],
+                "timestamp": now,
+                "count": len(people),
+                "people": people,
+            }
+
+    def _infer_relocations(self, now: float) -> None:
+        """Generalize the drawer-stow inference to a mobile carrier: a person
+        who handles an item that then goes quiet is presumed to carry it; the
+        item's likely location follows the carrier until they settle or are
+        lost. Annotations surface in snapshot()/where; tracks are untouched."""
+        if not self.cfg.presence_labels:
+            return
+        with self._lock:
+            live = {p["id"]: p for p in self.people}
+            # record current contact: a person within reach of a still-tracked item
+            for item in self.cfg.items.all():
+                track = self.engine.tracks.get(item.item_id)
+                if track is None:
+                    continue
+                quiet = now - track.last_update
+                # reach is horizontal: a person's feet project to the floor
+                # while the item sits at counter/shelf height
+                hdist = lambda p: math.hypot(p["position"][0] - track.position[0],
+                                             p["position"][1] - track.position[1])
+                if quiet <= PICKUP_QUIET_S:  # item still being seen: note any hand near it
+                    near = min((p for p in self.people if hdist(p) <= REACH_M),
+                               key=hdist, default=None)
+                    if near is not None:
+                        self._contact[item.item_id] = (near["id"], track.last_update)
+                elif item.item_id not in self._carries:
+                    # item just went quiet: was a hand on it right before?
+                    contact = self._contact.get(item.item_id)
+                    if contact and abs(contact[1] - track.last_update) <= PICKUP_QUIET_S:
+                        self._carries[item.item_id] = {
+                            "person": contact[0], "since": track.last_update,
+                            "where": None, "where_zone": None, "settled": False,
+                        }
+            self._advance_carries(now, live)
+        self._prune_person_memory(now)
+
+    def _advance_carries(self, now: float, live: dict) -> None:
+        for item_id, c in list(self._carries.items()):
+            track = self.engine.tracks.get(item_id)
+            if track is not None and track.last_update > c["since"]:
+                del self._carries[item_id]  # item seen again: the live track wins
+                continue
+            if now - c["since"] > CARRY_MAX_AGE_S:
+                del self._carries[item_id]
+                continue
+            carrier = live.get(c["person"])
+            if carrier is not None:
+                if carrier["speed_mps"] <= CARRY_SETTLE_SPEED:  # set down here
+                    c["where"], c["where_zone"], c["settled"] = (
+                        carrier["position"], carrier["zone"], True)
+                elif not c["settled"]:  # in transit, not yet put down anywhere
+                    c["where"], c["where_zone"] = carrier["position"], carrier["zone"]
+            elif not c["settled"]:
+                # carrier lost before settling: freeze at where we last saw them
+                last = self._person_last_seen.get(c["person"])
+                if last is not None:
+                    c["where"], c["where_zone"] = last["pos"], last["zone"]
+
+    def _prune_person_memory(self, now: float) -> None:
+        keep = {c["person"] for c in self._carries.values()}
+        for pid in list(self._person_last_seen):
+            if (pid not in keep
+                    and now - self._person_last_seen[pid]["ts"] > CARRY_MAX_AGE_S):
+                del self._person_last_seen[pid]
+
     def run(self) -> None:
         period = 1.0 / self.cfg.poll_hz
         self.start_sensors()
@@ -356,6 +483,12 @@ class Tracker:
                     for item_id, trail in self.trails.items()
                     if len(trail) >= 2
                 },
+                "people": list(self.people),
+                "people_trails": {
+                    pid: [list(p["pos"]) for p in list(trail)[-100:]]
+                    for pid, trail in self.people_trails.items()
+                    if len(trail) >= 2
+                },
                 "ranges": dict(self.last_ranges),
                 "bearings": dict(self.last_bearings),
                 "events": list(self.events)[-20:],
@@ -366,8 +499,17 @@ class Tracker:
             }
 
     def _annotate_stowed(self, snap: list[dict]) -> None:
-        """Infer "item is probably inside that drawer": last seen near the
-        movable's spot while it was open, unseen since it closed."""
+        """Inferred placement hints on each item entry:
+        - `maybe_in`: probably inside a drawer/door (closed over its spot).
+        - `maybe_carried_by` + `likely_zone`/`likely_position`: a person
+          handled it and carried it off (the mobile generalization)."""
+        for entry in snap:
+            c = self._carries.get(entry["item_id"])
+            if c is not None:
+                entry["maybe_carried_by"] = c["person"]
+                if c["where"] is not None:
+                    entry["likely_zone"] = c["where_zone"]
+                    entry["likely_position"] = [round(v, 3) for v in c["where"]]
         if self.cfg.movables is None:
             return
         spots = {s.name: s for s in self.cfg.world.spots}

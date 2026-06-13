@@ -31,6 +31,7 @@ class AppConfig:
     save_interval_s: float = 30.0
     parallel_polling: bool = True
     presence_labels: frozenset = frozenset({"person"})
+    presence_stale_after_s: float = 12.0  # occupant track drops after this unseen
     anchors: dict = field(default_factory=dict)  # fiducial tag -> world position
     movables: object = None  # MovableRegistry (doors/drawers) or None
     motion_zones: object = None  # MotionZoneController or None
@@ -191,6 +192,7 @@ def load_config(path: str | Path) -> AppConfig:
         save_interval_s=float(tracker.get("save_interval_s", 30.0)),
         parallel_polling=bool(tracker.get("parallel_polling", True)),
         presence_labels=frozenset(tracker.get("presence_labels", ["person"])),
+        presence_stale_after_s=float(tracker.get("presence_stale_after_s", 12.0)),
         anchors=anchors,
         movables=movables,
         motion_zones=motion_zones,

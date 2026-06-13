@@ -49,6 +49,13 @@ TRUST_MIN, TRUST_MAX = 0.7, 20.0
 NIS_ALPHA = 0.05
 SELF_CONSISTENCY_MAX_DT = 5.0
 
+# people are tracked through the same estimator as items, in a separate
+# registry. They move faster and matter less precisely than a set of keys,
+# so the association gate is looser and a fresh detection more readily
+# spawns a new occupant than hijacks an existing one.
+PERSON_GATE_MAHALANOBIS_SQ = 25.0  # ~5 sigma
+PERSON_HEIGHT_PRIOR_M = 1.2        # torso height for the single-ray fallback
+
 
 def triangulate_rays(rays: list[BearingObservation]) -> tuple[float, float, float] | None:
     """Least-squares closest point to a set of sight rays.
@@ -154,6 +161,9 @@ class FusionEngine:
         self.adaptive_trust = True
         self.sensor_nis: dict[str, float] = {}
         self._last_meas: dict[tuple[str, str], tuple[tuple, float]] = {}
+        # occupants: same machinery, separate registry — never items
+        self.people: dict[str, TrackState] = {}
+        self._person_seq = 0
 
     def trust(self, sensor_id: str) -> float:
         nis = self.sensor_nis.get(sensor_id)
@@ -320,6 +330,89 @@ class FusionEngine:
         track.observation_count += 1
         track.contributors[obs.sensor_id] = track.contributors.get(obs.sensor_id, 0) + 1
         return item_id
+
+    def ingest_presence(self, obs: Observation) -> str | None:
+        """Track an occupant detection through the same Kalman/gating
+        estimator as items, but in the separate `people` registry.
+
+        People get smoothed position + velocity and multi-person
+        association via the same Mahalanobis gate; they never enter item
+        tracks, `/items`, persistence, or anonymous look-alike resolution.
+        Returns the (auto-assigned) person id the detection was applied to.
+        """
+        if isinstance(obs, PositionObservation):
+            seed = tuple(obs.position)
+        elif isinstance(obs, BearingObservation):
+            seed = ray_at_height(obs, PERSON_HEIGHT_PRIOR_M)
+        else:
+            return None
+        # nearest gated occupant wins. Gating extrapolates each candidate to
+        # the observation time (velocity + grown covariance) on a scratch
+        # copy, so a person who moved between frames still associates instead
+        # of spawning a fresh track every step.
+        best = None
+        for pid, tr in self.people.items():
+            m = self._person_gate(tr, obs)
+            if m <= PERSON_GATE_MAHALANOBIS_SQ and (best is None or m < best[1]):
+                best = (pid, m)
+        if best is None:
+            self._person_seq += 1
+            pid = f"person-{self._person_seq}"
+            track = TrackState(pid, KalmanFilter3D(seed), last_update=obs.timestamp)
+            self.people[pid] = track
+        else:
+            pid = best[0]
+            track = self.people[pid]
+            track.filter.predict(max(obs.timestamp - track.last_update, 0.0))
+        if isinstance(obs, PositionObservation):
+            track.filter.update_position(obs.position, obs.sigma_m)
+        else:
+            track.filter.update_bearing(obs.origin, obs.direction, obs.sigma_rad)
+        track.last_update = obs.timestamp
+        track.last_sensor = obs.sensor_id
+        track.observation_count += 1
+        track.contributors[obs.sensor_id] = track.contributors.get(obs.sensor_id, 0) + 1
+        return pid
+
+    def _person_gate(self, track: "TrackState", obs: Observation) -> float:
+        """Mahalanobis distance of obs to a person track, evaluated at the
+        observation time. Predicts on a saved/restored copy so the live
+        track is untouched (the matched one is predicted for real later)."""
+        x0, P0 = list(track.filter.x), [row[:] for row in track.filter.P]
+        track.filter.predict(max(obs.timestamp - track.last_update, 0.0))
+        if isinstance(obs, PositionObservation):
+            m = track.filter.mahalanobis_sq(obs.position, obs.sigma_m)
+        else:
+            m = track.filter.mahalanobis_bearing_sq(
+                obs.origin, obs.direction, obs.sigma_rad)
+        track.filter.x, track.filter.P = x0, P0
+        return m
+
+    def prune_people(self, now: float, timeout: float) -> list[str]:
+        """Drop occupants unseen longer than `timeout` (people leave; unlike
+        items they are not held indefinitely). Returns the dropped ids."""
+        dead = [pid for pid, tr in self.people.items() if now - tr.last_update > timeout]
+        for pid in dead:
+            del self.people[pid]
+        return dead
+
+    def people_snapshot(self, now: float | None = None) -> list[dict]:
+        now = now if now is not None else time.time()
+        out = []
+        for pid, tr in self.people.items():
+            v = tr.filter.x[3:6]
+            out.append({
+                "id": pid,
+                "position": [round(c, 3) for c in tr.position],
+                "velocity": [round(c, 3) for c in v],
+                "speed_mps": round(math.sqrt(sum(c * c for c in v)), 2),
+                "sigma_m": round(tr.sigma_m, 3),
+                "zone": self.world.locate(tr.position),
+                "age_s": round(now - tr.last_update, 1),
+                "last_sensor": tr.last_sensor,
+                "observations": tr.observation_count,
+            })
+        return out
 
     def dump_state(self) -> list[dict]:
         """Serializable track state for persistence across restarts."""

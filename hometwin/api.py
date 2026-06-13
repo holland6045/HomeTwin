@@ -5,6 +5,7 @@ GET  /health           -> {"status": "ok", ...}
 GET  /items            -> all item estimates
 GET  /items/<query>    -> one item by id or name (404 if unknown)
 GET  /presence         -> latest occupancy estimate (tomography etc.)
+GET  /people           -> tracked occupants (smoothed position+velocity)
 GET  /events           -> recent zone-change events, oldest first
 GET  /overlay/map      -> world-space layers for the top-down map view
 GET  /overlay/camera/<sensor_id> -> same layers projected into camera pixels
@@ -266,6 +267,8 @@ def make_handler(tracker: Tracker, policy: AuthPolicy):
                 self._send(200, entry) if entry else self._send(404, {"error": "unknown item"})
             elif parts == ["presence"]:
                 self._send(200, tracker.presence or {"status": "no_data"})
+            elif parts == ["people"]:
+                self._send(200, list(tracker.people))
             elif parts == ["events"]:
                 self._send(200, list(tracker.events))
             else:

@@ -105,6 +105,11 @@ def map_overlay(tracker) -> dict:
         {"item_id": item_id, "points": points}
         for item_id, points in st["trails"].items()
     ]
+    people_trails = {pid: pts for pid, pts in st.get("people_trails", {}).items()}
+    people = [
+        {**p, "trail": people_trails.get(p["id"], [])}
+        for p in st.get("people", [])
+    ]
     anchors = [
         {"tag": tag, "position": list(pos)}
         for tag, positions in normalize_anchor_positions(
@@ -149,6 +154,7 @@ def map_overlay(tracker) -> dict:
         },
         "heatmaps": heatmaps,
         "cameras": cameras,
+        "people": people,
         "presence": tracker.presence,
         "events": st["events"],
         "floorplan": _floorplan_meta_cached(tracker),
@@ -267,6 +273,19 @@ def camera_overlay(tracker, sensor_id: str) -> dict | None:
         for seg in _project_polyline(geo, [tuple(p) for p in points]):
             trails.append({"item_id": item_id, "points": seg})
 
+    people = []
+    people_trails = st.get("people_trails", {})
+    for p in st.get("people", []):
+        pix = geo.world_to_pixel(tuple(p["position"]))
+        person = {"id": p["id"], "zone": p["zone"], "speed_mps": p["speed_mps"]}
+        if pix is not None:
+            person["u"], person["v"] = round(pix[0], 4), round(pix[1], 4)
+        person["trail"] = [
+            seg for seg in _project_polyline(
+                geo, [tuple(pt) for pt in people_trails.get(p["id"], [])])
+        ]
+        people.append(person)
+
     presence = None
     if tracker.presence:
         pix = geo.world_to_pixel(tuple(tracker.presence["centroid"]))
@@ -287,5 +306,6 @@ def camera_overlay(tracker, sensor_id: str) -> dict | None:
         "rings": rings,
         "trails": trails,
         "zones": zones,
+        "people": people,
         "presence": presence,
     }
