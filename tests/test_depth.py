@@ -112,3 +112,43 @@ def test_depth_uncalibrated_falls_back_to_plane():
     assert not cam.depth_scale.ready
     assert obs.position[2] == pytest.approx(0.0, abs=0.05)
     assert cam.drain_cloud() == []
+
+
+def test_depth_jpg_endpoint(tmp_path):
+    cv2 = pytest.importorskip("cv2")
+    import json
+    import urllib.error
+    import urllib.request
+
+    from hometwin.api import ApiServer
+    from hometwin.config import AppConfig
+    from hometwin.items import ItemRegistry
+    from hometwin.tracker import Tracker
+    from hometwin.world import World, Zone
+
+    item = Detection(label="mug", confidence=0.9, bbox=(0.45, 0.45, 0.1, 0.1))
+
+    class Det:
+        def detect(self, frame):
+            return [item]
+
+    cam = _camera(detector=Det(),
+                  depth_estimator=DepthAnything(session=FakeDepth(value=2.0), interval_s=0.0),
+                  depth_scale=2.0)
+    cfg = AppConfig(world=World([Zone("r", (0, 0, 0), (5, 5, 3))]),
+                    items=ItemRegistry(), sensors=[cam])
+    tr = Tracker(cfg)
+    api = ApiServer(tr, "127.0.0.1", 0)
+    api.start()
+    try:
+        # before any keyframe: 404
+        with pytest.raises(urllib.error.HTTPError) as e:
+            urllib.request.urlopen(f"http://127.0.0.1:{api.port}/camera/cam/depth.jpg", timeout=5)
+        assert e.value.code == 404
+        tr.step()  # produces a depth map
+        with urllib.request.urlopen(f"http://127.0.0.1:{api.port}/camera/cam/depth.jpg",
+                                    timeout=5) as r:
+            assert r.headers["Content-Type"] == "image/jpeg"
+            assert r.read(2)[:2] == b"\xff\xd8"  # JPEG
+    finally:
+        api.stop()

@@ -5,101 +5,171 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>HomeTwin</title>
 <style>
-  :root { --bg:#14171c; --panel:#1d2128; --fg:#d9dee7; --dim:#7d8696; --accent:#4ea1ff; }
+  :root {
+    --bg:#0f1216; --panel:#191d24; --panel2:#10131890; --line:#272d38;
+    --fg:#e3e8f0; --dim:#8590a0; --accent:#4ea1ff; --ok:#66d98c;
+    --warn:#e0a23c; --person:#ff5c8a; --radius:10px;
+  }
   * { box-sizing: border-box; }
-  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.4 system-ui, sans-serif; }
-  header { display:flex; align-items:center; gap:16px; padding:10px 16px; background:var(--panel); flex-wrap:wrap; }
-  header h1 { font-size:16px; margin:0 16px 0 0; font-weight:600; }
-  .tabs button, .layers label { background:none; border:1px solid #333a45; color:var(--fg);
-    padding:4px 10px; border-radius:6px; cursor:pointer; font-size:13px; }
-  .tabs button.active { border-color:var(--accent); color:var(--accent); }
-  .layers { display:flex; gap:8px; flex-wrap:wrap; }
-  .layers label { display:flex; align-items:center; gap:5px; user-select:none; }
-  main { display:flex; gap:12px; padding:12px; flex-wrap:wrap; }
-  #view-wrap { position:relative; flex:1 1 640px; min-width:480px; background:#0b0d10;
-    border-radius:8px; overflow:hidden; aspect-ratio:4/3; }
-  #stream { position:absolute; inset:0; width:100%; height:100%; object-fit:fill; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+    font:14px/1.45 system-ui, -apple-system, Segoe UI, sans-serif; }
+  header { display:flex; align-items:center; gap:14px; padding:9px 16px;
+    background:var(--panel); border-bottom:1px solid var(--line);
+    position:sticky; top:0; z-index:5; flex-wrap:wrap; }
+  .brand { font-size:15px; font-weight:650; letter-spacing:.02em; margin-right:4px; }
+  .brand b { color:var(--accent); }
+  #chips { display:flex; gap:7px; flex-wrap:wrap; }
+  .chip { display:inline-flex; align-items:center; gap:6px; font-size:12px;
+    color:var(--dim); background:var(--panel2); border:1px solid var(--line);
+    padding:3px 9px; border-radius:999px; white-space:nowrap; }
+  .chip b { color:var(--fg); font-weight:600; }
+  .dot { width:8px; height:8px; border-radius:50%; background:var(--dim); flex:none; }
+  .dot.ok { background:var(--ok); } .dot.warn { background:var(--warn); }
+  .dot.off { background:#444b57; } .dot.person { background:var(--person); }
+  .spacer { flex:1 1 auto; }
+  .tabs { display:flex; gap:6px; flex-wrap:wrap; }
+  .tabs button { background:none; border:1px solid var(--line); color:var(--dim);
+    padding:5px 11px; border-radius:8px; cursor:pointer; font-size:13px; transition:.12s; }
+  .tabs button:hover { color:var(--fg); }
+  .tabs button.active { border-color:var(--accent); color:var(--accent); background:#4ea1ff14; }
+  .btn { background:none; border:1px solid var(--line); color:var(--fg);
+    padding:5px 11px; border-radius:8px; cursor:pointer; font-size:13px; }
+  .btn:hover { border-color:var(--accent); color:var(--accent); }
+  /* layers popover */
+  .pop-wrap { position:relative; }
+  #layers { display:none; position:absolute; right:0; top:36px; width:230px;
+    background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
+    padding:10px 12px; box-shadow:0 12px 30px #0008; z-index:8; }
+  #layers.open { display:block; }
+  #layers .grp { font-size:10.5px; text-transform:uppercase; letter-spacing:.08em;
+    color:var(--dim); margin:9px 0 4px; }
+  #layers .grp:first-child { margin-top:0; }
+  #layers label { display:flex; align-items:center; gap:7px; padding:3px 0;
+    font-size:13px; cursor:pointer; user-select:none; }
+  #layers input { accent-color:var(--accent); }
+  main { display:flex; gap:14px; padding:14px; flex-wrap:wrap; align-items:flex-start; }
+  #view-wrap { position:relative; flex:1 1 640px; min-width:460px; background:#070809;
+    border-radius:var(--radius); overflow:hidden; aspect-ratio:4/3;
+    border:1px solid var(--line); }
+  /* fill (stretch): the camera-overlay canvas maps normalized coords across
+     the full box, so the video must fill it for annotations to register */
+  #stream, #depth-overlay { position:absolute; inset:0; width:100%; height:100%; object-fit:fill; }
+  #depth-overlay { display:none; opacity:.7; mix-blend-mode:screen; }
   #canvas { position:absolute; inset:0; width:100%; height:100%; }
   #splat-wrap { display:none; position:absolute; inset:0; }
-  aside { flex:0 0 300px; display:flex; flex-direction:column; gap:12px; }
-  .card { background:var(--panel); border-radius:8px; padding:12px; }
-  .card h2 { margin:0 0 8px; font-size:13px; text-transform:uppercase; letter-spacing:.05em; color:var(--dim); }
-  .item-row { display:flex; justify-content:space-between; padding:4px 0; border-bottom:1px solid #262c35; }
-  .item-row:last-child { border:none; }
+  #view-hint { position:absolute; left:10px; bottom:8px; font-size:11px; color:var(--dim);
+    background:#0009; padding:3px 8px; border-radius:6px; pointer-events:none; }
+  aside { flex:0 0 320px; display:flex; flex-direction:column; gap:14px; min-width:280px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
+    padding:13px 14px; }
+  .card h2 { margin:0 0 9px; font-size:11px; text-transform:uppercase; letter-spacing:.07em;
+    color:var(--dim); display:flex; justify-content:space-between; align-items:center; }
+  .card h2 .count { color:var(--fg); background:var(--panel2); border:1px solid var(--line);
+    border-radius:999px; padding:1px 8px; font-size:11px; letter-spacing:0; }
+  #item-search { width:100%; margin-bottom:8px; background:#0b0d10; color:var(--fg);
+    border:1px solid var(--line); border-radius:7px; padding:6px 9px; font-size:13px; }
+  .row { display:flex; align-items:center; gap:9px; padding:7px 0; border-bottom:1px solid var(--line); }
+  .row:last-child { border:none; }
+  .row .name { font-weight:550; }
+  .row .meta { margin-left:auto; text-align:right; font-size:12px; color:var(--dim); }
   .zone-name { color:var(--accent); }
-  .stale { color:#e0a23c; } .never { color:var(--dim); }
-  .ev { color:var(--dim); font-size:12px; padding:2px 0; }
-  #gear { margin-left:auto; background:none; border:1px solid #333a45; color:var(--fg);
-    padding:4px 10px; border-radius:6px; cursor:pointer; font-size:14px; }
-  #settings { display:none; position:fixed; inset:0; background:rgba(0,0,0,.55);
-    z-index:10; align-items:center; justify-content:center; }
-  #settings-card { width:460px; max-height:82vh; overflow:auto; }
+  .badge { font-size:10.5px; padding:1px 7px; border-radius:999px; border:1px solid;
+    margin-left:6px; vertical-align:middle; }
+  .badge.carry { color:var(--person); border-color:#ff5c8a55; background:#ff5c8a14; }
+  .badge.stow  { color:var(--warn); border-color:#e0a23c55; background:#e0a23c14; }
+  .badge.stale { color:var(--warn); border-color:#e0a23c55; }
+  .stale { color:var(--warn); } .never { color:var(--dim); }
+  .ev { color:var(--dim); font-size:12px; padding:3px 0; border-bottom:1px solid #20262f; }
+  .ev:last-child { border:none; }
+  .ev b { color:var(--fg); font-weight:550; }
+  .muted { color:var(--dim); font-size:12px; }
+  a.action { display:inline-block; color:var(--accent); text-decoration:none; font-size:13px; }
+  a.action:hover { text-decoration:underline; }
+  /* settings modal */
+  #settings { display:none; position:fixed; inset:0; background:#000a;
+    z-index:20; align-items:center; justify-content:center; }
+  #settings-card { width:480px; max-height:84vh; overflow:auto; }
   #settings input, #settings select { background:#0b0d10; color:var(--fg);
-    border:1px solid #333a45; border-radius:4px; padding:3px 6px; width:64px; }
-  #settings button { background:none; border:1px solid #333a45; color:var(--fg);
-    padding:4px 10px; border-radius:6px; cursor:pointer; font-size:13px; }
-  #settings button:hover { border-color:var(--accent); color:var(--accent); }
-  .cam-cfg { padding:8px 0; border-bottom:1px solid #262c35; }
-  .cam-cfg .now { color:var(--dim); font-size:12px; margin:2px 0 6px; }
-  .cam-cfg .fields { display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end; }
-  .cam-cfg label { display:flex; flex-direction:column; gap:2px; font-size:11px; color:var(--dim); }
-  .sysrow { display:flex; gap:8px; margin:6px 0; flex-wrap:wrap; }
-  #sys-shutdown { border-color:#7a3a3a; }
+    border:1px solid var(--line); border-radius:6px; padding:4px 7px; width:70px; }
+  #settings .btn { margin:0; }
+  .cam-cfg { padding:10px 0; border-bottom:1px solid var(--line); }
+  .cam-cfg .now { color:var(--dim); font-size:12px; margin:3px 0 7px; }
+  .cam-cfg .fields { display:flex; gap:9px; flex-wrap:wrap; align-items:flex-end; }
+  .cam-cfg label { display:flex; flex-direction:column; gap:3px; font-size:11px; color:var(--dim); }
+  .sysrow { display:flex; gap:8px; margin:8px 0; flex-wrap:wrap; }
+  #sys-shutdown { border-color:#7a3a3a; color:#e88; }
 </style>
 </head>
 <body>
 <header>
-  <h1>HomeTwin</h1>
+  <span class="brand"><b>Home</b>Twin</span>
+  <div id="chips"></div>
+  <span class="spacer"></span>
   <div class="tabs" id="tabs"></div>
-  <div class="layers" id="layers"></div>
-  <button id="gear" title="Settings">&#9881; Settings</button>
+  <div class="pop-wrap">
+    <button class="btn" id="layers-btn">&#9776; Layers</button>
+    <div id="layers"></div>
+  </div>
+  <button class="btn" id="gear" title="Settings">&#9881;</button>
 </header>
 <div id="settings">
   <div class="card" id="settings-card">
     <h2>Cameras</h2><div id="cam-config"></div>
-    <h2 style="margin-top:14px">System</h2>
+    <h2 style="margin-top:16px">System</h2>
     <div class="sysrow">
-      <button id="sys-restart">Restart</button>
-      <button id="sys-update">Update &amp; restart</button>
-      <button id="sys-shutdown">Shut down</button>
+      <button class="btn" id="sys-restart">Restart</button>
+      <button class="btn" id="sys-update">Update &amp; restart</button>
+      <button class="btn" id="sys-shutdown">Shut down</button>
+      <span class="spacer"></span>
+      <button class="btn" id="settings-close">Close</button>
     </div>
-    <div class="ev" id="settings-msg"></div>
+    <div class="muted" id="settings-msg"></div>
   </div>
 </div>
 <main>
   <div id="view-wrap">
     <img id="stream" alt="" style="display:none">
+    <img id="depth-overlay" alt="">
     <canvas id="canvas"></canvas>
     <div id="splat-wrap"></div>
+    <div id="view-hint"></div>
   </div>
   <aside>
-    <div class="card"><h2>Items</h2><div id="item-list"></div></div>
-    <div class="card"><h2>Events</h2><div id="event-list"></div></div>
-    <div class="card"><a id="diag" href="/debug/bundle" download>Download diagnostics</a></div>
+    <div class="card">
+      <h2>Items <span class="count" id="item-count">0</span></h2>
+      <input id="item-search" placeholder="filter items…" autocomplete="off">
+      <div id="item-list"></div>
+    </div>
+    <div class="card" id="people-card" style="display:none">
+      <h2>People <span class="count" id="people-count">0</span></h2>
+      <div id="people-list"></div>
+    </div>
+    <div class="card">
+      <h2>Activity</h2><div id="event-list"></div>
+    </div>
+    <div class="card">
+      <a class="action" id="diag" href="/debug/bundle" download>⇩ Download diagnostics</a>
+    </div>
   </aside>
 </main>
 <script>
 "use strict";
-const LAYERS = [
-  ["floorplan", "Floorplan", true],
-  ["zones", "Zones", true],
-  ["heat", "Tomography heat", true],
-  ["rings", "BLE ranges", true],
-  ["bearings", "Camera rays", true],
-  ["trails", "Trails", true],
-  ["anchors", "Anchors", true],
-  ["spots", "Spots", true],
-  ["movables", "Doors/drawers", true],
-  ["worldmodel", "World model", true],
-  ["motion", "Motion zones", true],
-  ["items", "Items", true],
-  ["people", "People", true],
-  ["presence", "Presence", true],
-];
+const LAYER_GROUPS = {
+  "Tracking": [["items", "Items"], ["people", "People"], ["trails", "Trails"],
+               ["presence", "Presence"]],
+  "Sensors":  [["heat", "Tomography heat"], ["rings", "BLE ranges"],
+               ["bearings", "Camera rays"], ["depth", "Depth (camera)"]],
+  "World":    [["floorplan", "Floorplan"], ["zones", "Zones"], ["anchors", "Anchors"],
+               ["spots", "Spots"], ["movables", "Doors/drawers"],
+               ["motion", "Motion zones"], ["worldmodel", "World model"]],
+};
+const LAYERS = Object.values(LAYER_GROUPS).flat();
+const LAYER_DEFAULT = { depth: false };  // depth needs the model loaded
 const ITEM_COLORS = ["#4ea1ff", "#ff7eb6", "#66d98c", "#c9a227", "#8a7dff", "#ff9d5c"];
-const state = { view: "map", cameras: [], data: null, toggles: {}, splat: false, splatVersion: null };
-for (const [k, , def] of LAYERS)
-  state.toggles[k] = localStorage.getItem("layer:" + k) ?? String(def);
+const state = { view: "map", cameras: [], data: null, toggles: {}, splat: false,
+                splatVersion: null, filter: "" };
+for (const [k] of LAYERS)
+  state.toggles[k] = localStorage.getItem("layer:" + k) ?? String(LAYER_DEFAULT[k] ?? true);
 
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
@@ -138,21 +208,37 @@ function itemColor(d, itemId) {
 function buildLayerToggles() {
   const el = document.getElementById("layers");
   el.innerHTML = "";
-  for (const [key, label] of LAYERS) {
-    const lab = document.createElement("label");
-    const cb = document.createElement("input");
-    cb.type = "checkbox";
-    cb.checked = on(key);
-    cb.onchange = () => {
-      state.toggles[key] = String(cb.checked);
-      localStorage.setItem("layer:" + key, state.toggles[key]);
-      render();
-      if (state.view === "3d" && splat3d && state.data) update3D(state.data);
-    };
-    lab.append(cb, label);
-    el.append(lab);
+  for (const [group, entries] of Object.entries(LAYER_GROUPS)) {
+    const h = document.createElement("div");
+    h.className = "grp"; h.textContent = group; el.append(h);
+    for (const [key, label] of entries) {
+      const lab = document.createElement("label");
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.checked = on(key);
+      cb.onchange = () => {
+        state.toggles[key] = String(cb.checked);
+        localStorage.setItem("layer:" + key, state.toggles[key]);
+        render();
+        if (state.view === "3d" && splat3d && state.data) update3D(state.data);
+      };
+      lab.append(cb, label);
+      el.append(lab);
+    }
   }
 }
+const layersPop = document.getElementById("layers");
+document.getElementById("layers-btn").onclick = (e) => {
+  e.stopPropagation(); layersPop.classList.toggle("open");
+};
+document.addEventListener("click", (e) => {
+  if (!layersPop.contains(e.target) && e.target.id !== "layers-btn")
+    layersPop.classList.remove("open");
+});
+document.getElementById("item-search").oninput = (e) => {
+  state.filter = e.target.value.toLowerCase();
+  if (state.data) renderPanel(state.data.items, state.data.events);
+};
 
 function buildTabs() {
   const el = document.getElementById("tabs");
@@ -703,56 +789,115 @@ function update3D(d) {
 }
 
 /* ---------- side panel ---------- */
+const STATUS_DOT = { tracked: "ok", stale: "warn", never_seen: "off" };
 function renderPanel(items, events) {
   const list = document.getElementById("item-list");
   list.innerHTML = "";
-  for (const it of items) {
+  const shown = items.filter(it => !state.filter || it.name.toLowerCase().includes(state.filter));
+  document.getElementById("item-count").textContent =
+    `${items.filter(i => i.status === "tracked").length}/${items.length}`;
+  for (const it of shown) {
     const row = document.createElement("div");
-    row.className = "item-row";
+    row.className = "row";
+    const dot = document.createElement("span");
+    dot.className = "dot " + (STATUS_DOT[it.status] || "off");
     const name = document.createElement("span");
-    name.textContent = it.name;
-    const where = document.createElement("span");
+    name.className = "name"; name.textContent = it.name;
+    const meta = document.createElement("span");
+    meta.className = "meta";
     if (it.status === "never_seen") {
-      const n = document.createElement("span");
-      n.className = "never"; n.textContent = "never seen";
-      where.append(n);
+      meta.innerHTML = `<span class="never">never seen</span>`;
     } else if (it.maybe_carried_by) {
-      const place = document.createElement("span");
-      place.className = "zone-name";
-      place.textContent = `carried by ${it.maybe_carried_by} → ${it.likely_zone || "?"}`;
-      where.append(place);
+      meta.innerHTML = `<span class="zone-name">${it.likely_zone || "?"}</span>`
+        + `<span class="badge carry">carried · ${it.maybe_carried_by}</span>`;
     } else {
-      const place = document.createElement("span");
-      place.className = "zone-name";
-      place.textContent = it.maybe_in ? `likely in ${it.maybe_in}` : (it.spot || it.zone || "unzoned");
-      const age = document.createElement("span");
-      age.className = it.status === "stale" ? "stale" : "";
-      age.textContent = `${it.age_s}s`;
-      where.append(place, ` ±${it.sigma_m}m `, age);
+      const place = it.maybe_in ? it.maybe_in : (it.spot || it.zone || "unzoned");
+      meta.innerHTML = `<span class="zone-name">${place}</span>`
+        + (it.maybe_in ? `<span class="badge stow">stowed</span>` : "")
+        + `<span class="${it.status === "stale" ? "stale" : "muted"}"> ±${it.sigma_m}m · ${it.age_s}s</span>`;
     }
-    row.append(name, where);
+    row.append(dot, name, meta);
     list.append(row);
   }
+  if (!shown.length) list.innerHTML = `<div class="muted">no items</div>`;
+
   const ev = document.getElementById("event-list");
   ev.innerHTML = "";
-  for (const e of [...events].reverse()) {
+  for (const e of [...events].reverse().slice(0, 12)) {
     const div = document.createElement("div");
     div.className = "ev";
     if (e.event === "picked_up")
-      div.textContent = `${e.item_id}: picked up by ${e.carried_by}`;
+      div.innerHTML = `<b>${e.item_id}</b> picked up by ${e.carried_by}`;
     else if (e.event === "placed")
-      div.textContent = `${e.item_id}: placed in ${e.placed_in} by ${e.carried_by}`;
+      div.innerHTML = `<b>${e.item_id}</b> placed in ${e.placed_in} by ${e.carried_by}`;
     else if (e.event)
-      div.textContent = `${e.movable}: ${e.event}`;
+      div.innerHTML = `<b>${e.movable}</b> ${e.event}`;
     else if (e.motion_zone)
-      div.textContent = `${e.motion_zone}: motion ${e.state}`;
+      div.innerHTML = `<b>${e.motion_zone}</b> motion ${e.state}`;
     else
-      div.textContent = `${e.item_id}: ${e.from_spot || e.from_zone || "?"} → ${e.to_spot || e.to_zone || "?"}`;
+      div.innerHTML = `<b>${e.item_id}</b> ${e.from_spot || e.from_zone || "?"} → ${e.to_spot || e.to_zone || "?"}`;
     ev.append(div);
+  }
+  if (!events.length) ev.innerHTML = `<div class="muted">no activity yet</div>`;
+}
+
+function renderPeople(people) {
+  const card = document.getElementById("people-card");
+  const list = document.getElementById("people-list");
+  people = people || [];
+  card.style.display = people.length ? "block" : "none";
+  document.getElementById("people-count").textContent = people.length;
+  list.innerHTML = "";
+  for (const p of people) {
+    const row = document.createElement("div");
+    row.className = "row";
+    const dot = document.createElement("span"); dot.className = "dot person";
+    const name = document.createElement("span"); name.className = "name"; name.textContent = p.id;
+    const meta = document.createElement("span"); meta.className = "meta";
+    meta.innerHTML = `<span class="zone-name">${p.zone || "—"}</span>`
+      + `<span class="muted"> ${p.speed_mps} m/s</span>`;
+    row.append(dot, name, meta);
+    list.append(row);
   }
 }
 
+function chip(dotClass, label, value) {
+  return `<span class="chip"><span class="dot ${dotClass}"></span>`
+    + (value !== undefined ? `<b>${value}</b> ` : "") + label + `</span>`;
+}
+function updateChips(d) {
+  const tracked = (d.items || []).filter(i => i.status === "tracked").length;
+  const total = (d.items || []).length;
+  const people = (d.people || []).length;
+  const cams = (d.cameras || []);
+  const depthCam = cams.find(c => c.depth);
+  const depthReady = cams.some(c => c.depth && c.depth.ready);
+  const parts = [
+    chip(tracked ? "ok" : "off", `of ${total} items`, tracked),
+    chip(people ? "person" : "off", people === 1 ? "person" : "people", people),
+    chip(cams.length ? "ok" : "off", cams.length === 1 ? "camera" : "cameras", cams.length),
+  ];
+  if (depthCam)
+    parts.push(chip(depthReady ? "ok" : "warn", depthReady ? "depth ready" : "depth calibrating"));
+  document.getElementById("chips").innerHTML = parts.join("");
+}
+
 /* ---------- main loop ---------- */
+const depthOverlay = document.getElementById("depth-overlay");
+function hint(t) { document.getElementById("view-hint").textContent = t; }
+function hideDepthOverlay() {
+  depthOverlay.style.display = "none";
+  if (depthOverlay.dataset.cam) delete depthOverlay.dataset.cam;
+}
+function updateDepthOverlay(cam) {
+  if (!on("depth")) { hideDepthOverlay(); return; }
+  depthOverlay.style.display = "block";
+  depthOverlay.dataset.cam = cam;
+  const base = assetUrl(`/camera/${encodeURIComponent(cam)}/depth.jpg`);
+  depthOverlay.src = base + (base.includes("?") ? "&" : "?") + "t=" + Date.now();
+}
+depthOverlay.onerror = () => { depthOverlay.style.display = "none"; };
+
 function render() {
   if (!state.data || state.view === "3d") return;
   const wrap = document.getElementById("view-wrap");
@@ -784,6 +929,10 @@ async function tick() {
         }
       }
       renderPanel(d.items, d.events);
+      renderPeople(d.people);
+      updateChips(d);
+      hideDepthOverlay();
+      hint(want3d ? "drag to orbit · scroll to zoom" : "shift-drag the map to draw a motion zone");
       if (want3d) { ensurePointCloud(); if (splat3d) update3D(d); return; }
       stream.style.display = "none";
       // drop the MJPEG connection (each open stream holds a server thread)
@@ -795,8 +944,12 @@ async function tick() {
         || assetUrl(`/camera/${encodeURIComponent(state.view)}/stream.mjpg`);
       if (stream.dataset.src !== want) { stream.dataset.src = want; stream.src = want; }
       stream.style.display = "block";
+      updateDepthOverlay(state.view);
       const map = await (await authFetch("/overlay/map")).json();
       renderPanel(map.items, map.events);
+      renderPeople(map.people);
+      updateChips(map);
+      hint(`📷 ${state.view}` + (on("depth") ? " · depth overlay" : ""));
     }
     render();
   } catch (e) { /* tracker restarting; retry next tick */ }
@@ -857,6 +1010,7 @@ document.getElementById("gear").onclick = () => {
 settings.addEventListener("click", (e) => {
   if (e.target === settings) settings.style.display = "none";
 });
+document.getElementById("settings-close").onclick = () => { settings.style.display = "none"; };
 function sMsg(t) { document.getElementById("settings-msg").textContent = t; }
 
 async function loadCamConfig() {

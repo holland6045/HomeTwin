@@ -241,6 +241,8 @@ def make_handler(tracker: Tracker, policy: AuthPolicy):
                 })
             elif len(parts) == 3 and parts[0] == "camera" and parts[2] == "frame.jpg":
                 self._frame_jpg(parts[1])
+            elif len(parts) == 3 and parts[0] == "camera" and parts[2] == "depth.jpg":
+                self._depth_jpg(parts[1])
             elif len(parts) == 3 and parts[0] == "camera" and parts[2] == "stream.mjpg":
                 self._stream_mjpg(parts[1])
             elif parts == ["debug", "bundle"]:
@@ -304,6 +306,30 @@ def make_handler(tracker: Tracker, policy: AuthPolicy):
             if qs.get("annotate", ["0"])[0] not in ("0", "", "false"):
                 frame = _annotate(frame, cam.last_detections)
             ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+            if not ok:
+                self._send(500, {"error": "JPEG encode failed"})
+                return
+            self._send_bytes(buf.tobytes(), "image/jpeg")
+
+        def _depth_jpg(self, sensor_id: str) -> None:
+            """Colorized snapshot of a camera's latest monocular-depth map."""
+            cam = next((s for s in tracker.sensors
+                        if getattr(s, "sensor_id", None) == sensor_id), None)
+            dmap = getattr(cam, "_depth_map", None) if cam else None
+            if dmap is None:
+                self._send(404, {"error": "no depth map (depth not enabled / no keyframe yet)"})
+                return
+            try:
+                import cv2
+                import numpy as np
+            except ImportError:
+                self._send(503, {"error": "opencv not installed"})
+                return
+            lo, hi = float(dmap.min()), float(dmap.max())
+            norm = (dmap - lo) / (hi - lo + 1e-6)
+            u8 = (norm * 255).astype(np.uint8)
+            color = cv2.applyColorMap(u8, cv2.COLORMAP_INFERNO)
+            ok, buf = cv2.imencode(".jpg", color, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
             if not ok:
                 self._send(500, {"error": "JPEG encode failed"})
                 return
