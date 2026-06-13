@@ -209,3 +209,29 @@ def test_carry_hypothesis_survives_restart(tmp_path):
     entry = tr2.find("keys")
     assert entry["maybe_carried_by"] == "person-1"
     assert entry["likely_zone"] == "sofa"
+
+
+def test_people_exposed_via_api_and_overlay():
+    import json
+    import urllib.request
+
+    from hometwin.api import ApiServer
+    from hometwin.overlay import map_overlay
+
+    s = ScriptedSensor("cam")
+    tr = tracker_with(s)
+    for i in range(4):
+        s.push([person(100.0 + i, (1.0 + 0.2 * i, 1.0, 0.0))]); tr.step()
+
+    ov = map_overlay(tr)
+    assert ov["people"] and ov["people"][0]["id"] == "person-1"
+    assert "trail" in ov["people"][0]
+
+    api = ApiServer(tr, "127.0.0.1", 0)
+    api.start()
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{api.port}/people", timeout=5) as r:
+            people = json.loads(r.read())
+        assert people[0]["id"] == "person-1" and people[0]["zone"] == "counter"
+    finally:
+        api.stop()
