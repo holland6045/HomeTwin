@@ -16,7 +16,7 @@ from importlib.metadata import entry_points
 
 _REGISTRY: dict[str, dict[str, Callable]] = {}
 
-KINDS = ("sensor", "detector", "frame_source", "trainer")
+KINDS = ("sensor", "detector", "frame_source", "trainer", "depth")
 
 
 def register(kind: str, name: str) -> Callable:
@@ -52,6 +52,7 @@ _BUILTIN_MODULES = (
     "hometwin.detectors.aruco",
     "hometwin.detectors.onnx",
     "hometwin.detectors.rtdetr",
+    "hometwin.depth",
     "hometwin.training.trainers",
 )
 

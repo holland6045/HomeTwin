@@ -225,6 +225,11 @@ class Tracker:
                         self._presence_clock = max(
                             getattr(self, "_presence_clock", 0.0), obs.timestamp)
         self._record_zone_changes(touched)
+        # dense monocular-depth points feed the passive world model
+        for sensor in self.sensors:
+            if hasattr(sensor, "drain_cloud"):
+                for point, weight, pts in sensor.drain_cloud():
+                    self.worldmodel.add_point(point, pts, weight=weight)
         if self.cfg.movables is not None:
             for event in self.cfg.movables.events:
                 # a drawer/door physically moving IS motion at its location

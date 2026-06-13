@@ -410,6 +410,18 @@ MODEL_ZOO = {
             "quantized": ("onnx/model_quantized.onnx", None),
         },
     },
+    # Depth Anything V2 small (Apache-2.0): relative inverse-depth, scaled
+    # to metric against a known fiducial for monocular 3D + a dense cloud.
+    "depth": {
+        "repo": "onnx-community/depth-anything-v2-small",
+        "files": {
+            "fp32": ("onnx/model.onnx",
+                     "afb6a5c28f3b6bf1618c6e43f02073ef9dfdc70e937502d51603e57b0a1df10c"),
+            "fp16": ("onnx/model_fp16.onnx", None),
+            "int8": ("onnx/model_int8.onnx", None),
+            "quantized": ("onnx/model_quantized.onnx", None),
+        },
+    },
 }
 
 
@@ -454,10 +466,17 @@ def cmd_get_model(args) -> int:
         return 1
     tmp.replace(out)
     print(f"saved {out}", file=sys.stderr)
-    print(f"""
+    if args.model == "rtdetr":
+        print(f"""
 # add to a camera in your config (interval_s throttles CPU inference):
 #     detector: {{type: rtdetr, model_path: {out.as_posix()}, conf_threshold: 0.5, interval_s: 0.5}}
 # person detections then drive motion zones + presence automatically.""")
+    elif args.model == "depth":
+        print(f"""
+# add to a camera in your config (needs a visible surveyed anchor to scale,
+# or set scale: <k> manually):
+#     depth: {{type: depth_anything, model_path: {out.as_posix()}, interval_s: 1.0}}
+# gives items metric 3D off the surface plane + a dense world-model cloud.""")
     return 0
 
 

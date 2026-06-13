@@ -33,6 +33,15 @@ the v2 weights if the accuracy bump is ever wanted.
 
 ## Priority 2 — Depth Anything V2-small: single-camera depth prior
 
+**Status: landed.** Depth plugin `depth_anything` (`hometwin/depth.py`);
+`hometwin get-model depth` fetches the checksummed ONNX (fp16/int8
+variants too). Add a `depth:` block to a camera; `DepthScale` fits
+relative→metric from any visible surveyed anchor (or a manual `scale:`),
+items off the surface plane get true 3D, and a strided back-projection
+deposits a dense cloud into the world model. Inference is throttled
+(`interval_s`). Validated against the real model (disparity monotonic,
+metric near<far). See `docs/depth.md`.
+
 - `onnx-community/depth-anything-v2-small` (Apache-2.0; note: base/large
   are CC-BY-NC). V3-small also up (Apache), newer and worth A/B.
 - Why: our single-camera depth comes from the surface-plane assumption

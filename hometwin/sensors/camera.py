@@ -115,6 +115,11 @@ class CameraSensor(SensorAdapter):
         hfov_deg: float = 70.0,
         source: dict | None = None,
         stream_url: str | None = None,  # browser-loadable MJPEG/snapshot URL
+        depth: dict | None = None,      # optional monocular-depth block
+        depth_estimator=None,           # injectable (tests)
+        depth_scale: float | None = None,  # manual relative->metric override
+        depth_dense: bool = True,       # deposit dense world-model points
+        depth_dense_stride: int = 24,   # pixel stride for the dense cloud
     ):
         super().__init__(sensor_id)
         self.stream_url = stream_url
@@ -130,6 +135,20 @@ class CameraSensor(SensorAdapter):
             raise ValueError(f"camera {sensor_id!r} needs a frame source and a detector")
         if mode not in ("surface", "ray"):
             raise ValueError(f"camera {sensor_id!r}: mode must be 'surface' or 'ray'")
+        if depth_estimator is None and depth:
+            cfg = dict(depth)
+            depth_scale = cfg.pop("scale", depth_scale)
+            depth_dense = cfg.pop("dense", depth_dense)
+            depth_dense_stride = cfg.pop("dense_stride", depth_dense_stride)
+            depth_estimator = create("depth", cfg.pop("type"), **cfg)
+        self.depth = depth_estimator
+        self.depth_dense = depth_dense
+        self.depth_dense_stride = depth_dense_stride
+        self._depth_map = None
+        self._cloud: list = []
+        from hometwin.depth import DepthScale
+
+        self.depth_scale = DepthScale(k=depth_scale)
         self.frame_source = frame_source
         self.detector = detector
         self.surface_z = surface_z
@@ -198,7 +217,9 @@ class CameraSensor(SensorAdapter):
         if hasattr(self.frame_source, "stop"):
             self.frame_source.stop()
 
-    def to_observation(self, det: Detection, ts: float) -> Observation | None:
+    def to_observation(
+        self, det: Detection, ts: float, metric_dist: float | None = None
+    ) -> Observation | None:
         # occupants are localized from their feet (bbox bottom-center) on
         # the floor; items from their centroid on the configured surface
         presence = not det.tag_id and det.label in self._presence_labels
@@ -220,11 +241,18 @@ class CameraSensor(SensorAdapter):
                 direction=self.geometry.ray(u, v),
                 sigma_rad=self.bearing_sigma_rad,
             )
-        pos = self.geometry.project_to_plane(u, v, plane_z)
-        if pos is None:
-            return None
-        # uncertainty grows with distance from the camera
-        d = math.dist(pos, self.geometry.position)
+        if metric_dist is not None:
+            # back-project the sight ray to the depth-derived distance: true
+            # 3D for items off the surface plane, no plane assumption
+            ray = self.geometry.ray(u, v)
+            pos = tuple(self.geometry.position[i] + ray[i] * metric_dist for i in range(3))
+            sigma = max(0.1, 0.06 * metric_dist) * sigma_scale
+        else:
+            pos = self.geometry.project_to_plane(u, v, plane_z)
+            if pos is None:
+                return None
+            # uncertainty grows with distance from the camera
+            sigma = self.base_sigma_m * max(math.dist(pos, self.geometry.position), 1.0) * sigma_scale
         return PositionObservation(
             sensor_id=self.sensor_id,
             timestamp=ts,
@@ -232,7 +260,7 @@ class CameraSensor(SensorAdapter):
             label=det.label,
             confidence=det.confidence,
             position=pos,
-            sigma_m=self.base_sigma_m * max(d, 1.0) * sigma_scale,
+            sigma_m=sigma,
         )
 
     def overlay(self) -> dict:
@@ -245,6 +273,7 @@ class CameraSensor(SensorAdapter):
             "surface_z": self.surface_z,
             "stream_url": self.stream_url,
             "calibration": self.calibrator.status() if self.calibrator else None,
+            "depth": self.depth_scale.status() if self.depth is not None else None,
         }
 
     def poll(self) -> list[Observation]:
@@ -254,6 +283,12 @@ class CameraSensor(SensorAdapter):
         ts = self.clock()
         dets = self.detector.detect(frame)
         self.last_frame, self.last_frame_ts, self.last_detections = frame, ts, dets
+        if self.depth is not None:
+            depth_map = self.depth.infer(frame)
+            if depth_map is not None:
+                self._depth_map = depth_map
+                self._calibrate_depth(dets)
+                self._build_cloud(ts)
         out = []
         for det in dets:
             if self.movables and det.tag_id and self.movables.observe_ray(
@@ -281,10 +316,61 @@ class CameraSensor(SensorAdapter):
                 pos, sigma_m = self._soft_refs[det.tag_id]
                 self._ensure_calibrator().observe_soft(det.tag_id, *det.center, ts, pos, sigma_m)
                 # fall through: still a tracked item observation
-            obs = self.to_observation(det, ts)
+            obs = self.to_observation(det, ts, metric_dist=self._depth_dist(det))
             if obs is not None:
                 out.append(obs)
         return out
+
+    def _depth_dist(self, det: Detection) -> float | None:
+        """Metric distance for an item detection from the depth map, or None
+        (uncalibrated / no depth / occupant on the floor path)."""
+        if (self._depth_map is None or not self.depth_scale.ready
+                or (not det.tag_id and det.label in self._presence_labels)):
+            return None
+        from hometwin.depth import sample_disparity
+
+        return self.depth_scale.metric(sample_disparity(self._depth_map, *det.center))
+
+    def _calibrate_depth(self, dets) -> None:
+        """Any detected tag whose world position is known (a surveyed anchor)
+        gives one labeled relative->metric sample: disparity at its pixel vs
+        its true distance from the camera."""
+        anchors = getattr(self.calibrator, "anchors", None) if self.calibrator else None
+        if not anchors:
+            return
+        from hometwin.depth import sample_disparity
+
+        cam = self.geometry.position
+        for det in dets:
+            positions = anchors.get(det.tag_id) if det.tag_id else None
+            if not positions:
+                continue
+            dist = min(math.dist(cam, p) for p in positions)
+            self.depth_scale.observe(sample_disparity(self._depth_map, *det.center), dist)
+
+    def _build_cloud(self, ts: float) -> None:
+        """Back-project a strided grid of the depth map into world points for
+        the passive world model — a dense sketch from one camera."""
+        if not (self.depth_dense and self.depth_scale.ready):
+            return
+        from hometwin.depth import sample_disparity
+
+        cam, step = self.geometry.position, self.depth_dense_stride
+        h, w = self._depth_map.shape[:2]
+        pts = []
+        for py in range(step // 2, h, step):
+            for px in range(step // 2, w, step):
+                metric = self.depth_scale.metric(float(self._depth_map[py, px]))
+                if metric is None or metric > 12.0:
+                    continue
+                ray = self.geometry.ray((px + 0.5) / w, (py + 0.5) / h)
+                pts.append((tuple(cam[i] + ray[i] * metric for i in range(3)), 0.2, ts))
+        self._cloud = pts
+
+    def drain_cloud(self) -> list:
+        """Hand the latest dense point batch to the tracker, once."""
+        cloud, self._cloud = self._cloud, []
+        return cloud
 
 
 @register("frame_source", "opencv")
