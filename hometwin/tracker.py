@@ -87,6 +87,11 @@ class Tracker:
             restored = self.engine.restore_state(self.store.load())
             if restored:
                 log.info("restored %d track(s) from %s", restored, cfg.state_path)
+            # restore "likely carried to ..." hypotheses for items still unseen
+            self._carries = {
+                item_id: c for item_id, c in self.store.load_meta().get("carries", {}).items()
+                if self.cfg.items.get(item_id) is not None
+            }
             # restored locations are the zone baseline, not "arrival" events
             for t in self.engine.tracks.values():
                 self._zones[t.item_id] = (
@@ -98,7 +103,13 @@ class Tracker:
         if self.store:
             with self._lock:
                 state = self.engine.dump_state()
-            self.store.save(state)
+                # persist settled carry hypotheses: "where did I leave it"
+                # must survive a restart even when the item itself is unseen
+                carries = {
+                    item_id: {**c, "restored": True}
+                    for item_id, c in self._carries.items() if c.get("where")
+                }
+            self.store.save(state, meta={"carries": carries})
         if self._wm_path:
             self.worldmodel.decay_and_compact(
                 self.worldmodel.maintenance_now(time.time())
@@ -410,6 +421,9 @@ class Tracker:
                             "person": contact[0], "since": track.last_update,
                             "where": None, "where_zone": None, "settled": False,
                         }
+                        self.events.append({
+                            "timestamp": track.last_update, "item_id": item.item_id,
+                            "carried_by": contact[0], "event": "picked_up"})
             self._advance_carries(now, live)
         self._prune_person_memory(now)
 
@@ -419,21 +433,30 @@ class Tracker:
             if track is not None and track.last_update > c["since"]:
                 del self._carries[item_id]  # item seen again: the live track wins
                 continue
-            if now - c["since"] > CARRY_MAX_AGE_S:
+            if not c.get("restored") and now - c["since"] > CARRY_MAX_AGE_S:
                 del self._carries[item_id]
                 continue
             carrier = live.get(c["person"])
             if carrier is not None:
-                if carrier["speed_mps"] <= CARRY_SETTLE_SPEED:  # set down here
+                spd = carrier["speed_mps"]
+                if spd <= CARRY_SETTLE_SPEED:  # set down here
                     c["where"], c["where_zone"], c["settled"] = (
                         carrier["position"], carrier["zone"], True)
-                elif not c["settled"]:  # in transit, not yet put down anywhere
-                    c["where"], c["where_zone"] = carrier["position"], carrier["zone"]
+                else:
+                    if c["settled"] and spd > CARRY_SETTLE_SPEED * 3:
+                        c["settled"], c["announced"] = False, False  # picked up again
+                    if not c["settled"]:  # in transit, not yet put down anywhere
+                        c["where"], c["where_zone"] = carrier["position"], carrier["zone"]
             elif not c["settled"]:
                 # carrier lost before settling: freeze at where we last saw them
                 last = self._person_last_seen.get(c["person"])
                 if last is not None:
                     c["where"], c["where_zone"] = last["pos"], last["zone"]
+            if c["settled"] and c["where_zone"] and not c.get("announced"):
+                self.events.append({
+                    "timestamp": now, "item_id": item_id, "carried_by": c["person"],
+                    "placed_in": c["where_zone"], "event": "placed"})
+                c["announced"] = True
 
     def _prune_person_memory(self, now: float) -> None:
         keep = {c["person"] for c in self._carries.values()}

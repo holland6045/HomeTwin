@@ -165,3 +165,47 @@ def test_person_localizes_from_feet_not_centroid():
     # occupant carries a coarser sigma than an item fix
     assert cam.to_observation(person_det, 100.0).sigma_m > \
         cam.to_observation(item_det, 100.0).sigma_m
+
+
+def test_relocation_emits_events():
+    s = ScriptedSensor("cam")
+    tr = tracker_with(s, [Item("keys", "House keys", labels=["keys"])])
+    for i in range(3):
+        s.push([keys(100.0 + i, (1.0, 1.0, 0.9)), person(100.0 + i, (1.2, 1.0, 0.0))])
+        tr.step()
+    for j, (x, y) in enumerate([(2.0, 2.0), (3.0, 3.0), (4.5, 4.5), (5.0, 5.0)]):
+        s.push([person(104.0 + j, (x, y, 0.0))]); tr.step()
+    for j in range(3):
+        s.push([person(108.0 + j, (5.0, 5.0, 0.0))]); tr.step()
+    kinds = [e.get("event") for e in tr.events]
+    assert "picked_up" in kinds
+    placed = [e for e in tr.events if e.get("event") == "placed"]
+    assert placed and placed[-1]["placed_in"] == "sofa"
+
+
+def test_carry_hypothesis_survives_restart(tmp_path):
+    state = str(tmp_path / "state.json")
+
+    def build():
+        reg = ItemRegistry(); reg.add(Item("keys", "House keys", labels=["keys"]))
+        cfg = AppConfig(world=make_world(), items=reg, sensors=[ScriptedSensor("cam")],
+                        presence_stale_after_s=5.0, state_path=state)
+        return Tracker(cfg), cfg.sensors[0]
+
+    tr, s = build()
+    for i in range(3):
+        s.push([keys(100.0 + i, (1.0, 1.0, 0.9)), person(100.0 + i, (1.2, 1.0, 0.0))])
+        tr.step()
+    for j, (x, y) in enumerate([(2.0, 2.0), (3.5, 3.5), (5.0, 5.0)]):
+        s.push([person(104.0 + j, (x, y, 0.0))]); tr.step()
+    for j in range(3):
+        s.push([person(107.0 + j, (5.0, 5.0, 0.0))]); tr.step()
+    assert tr.find("keys")["likely_zone"] == "sofa"
+    tr.save_state()
+
+    # fresh process: item track restores to its last real fix (the counter),
+    # but the carry hypothesis says it was last carried to the sofa
+    tr2, _ = build()
+    entry = tr2.find("keys")
+    assert entry["maybe_carried_by"] == "person-1"
+    assert entry["likely_zone"] == "sofa"

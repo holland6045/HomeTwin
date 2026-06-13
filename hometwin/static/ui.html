@@ -738,9 +738,16 @@ function renderPanel(items, events) {
   for (const e of [...events].reverse()) {
     const div = document.createElement("div");
     div.className = "ev";
-    div.textContent = e.event
-      ? `${e.movable}: ${e.event}`
-      : `${e.item_id}: ${e.from_spot || e.from_zone || "?"} → ${e.to_spot || e.to_zone || "?"}`;
+    if (e.event === "picked_up")
+      div.textContent = `${e.item_id}: picked up by ${e.carried_by}`;
+    else if (e.event === "placed")
+      div.textContent = `${e.item_id}: placed in ${e.placed_in} by ${e.carried_by}`;
+    else if (e.event)
+      div.textContent = `${e.movable}: ${e.event}`;
+    else if (e.motion_zone)
+      div.textContent = `${e.motion_zone}: motion ${e.state}`;
+    else
+      div.textContent = `${e.item_id}: ${e.from_spot || e.from_zone || "?"} → ${e.to_spot || e.to_zone || "?"}`;
     ev.append(div);
   }
 }
