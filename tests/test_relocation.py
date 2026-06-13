@@ -136,3 +136,32 @@ def test_item_quietly_lost_without_contact_is_not_carried():
         tr.step()
     assert "keys" not in tr._carries
     assert tr.find("keys").get("maybe_carried_by") is None
+
+
+def test_person_localizes_from_feet_not_centroid():
+    """A standing person projects from the bbox bottom (feet) onto the floor;
+    an item with the same box projects from its centroid onto the surface."""
+    from hometwin.observations import Detection
+    from hometwin.sensors.camera import CameraGeometry, CameraSensor
+
+    geo = CameraGeometry(position=(2.0, 0.0, 2.2), yaw_deg=90, pitch_deg=45)
+
+    class Frames:
+        def get_frame(self):
+            return None
+
+    cam = CameraSensor("cam", geometry=geo, frame_source=Frames(),
+                       detector=object(), surface_z=0.0)
+    cam.attach_presence_labels(["person"])
+    box = (0.4, 0.2, 0.2, 0.6)  # x,y,w,h ; center v=0.5, bottom v=0.8
+    person_det = Detection(label="person", confidence=0.9, bbox=box)
+    item_det = Detection(label="keys", confidence=0.9, bbox=box)
+
+    p_person = cam.to_observation(person_det, 100.0).position
+    p_item = cam.to_observation(item_det, 100.0).position
+    # feet are lower in the image than the centroid -> project nearer the
+    # camera in y than the centroid would
+    assert p_person[1] != pytest.approx(p_item[1], abs=0.1)
+    # occupant carries a coarser sigma than an item fix
+    assert cam.to_observation(person_det, 100.0).sigma_m > \
+        cam.to_observation(item_det, 100.0).sigma_m

@@ -141,6 +141,10 @@ class CameraSensor(SensorAdapter):
         self.movables = None
         self.device_tags = None
         self._soft_refs: dict[str, tuple[tuple, float]] = {}
+        # occupant classes localize from their feet (bbox bottom) onto the
+        # floor, not the item surface; attached from config.presence_labels
+        self._presence_labels: frozenset = frozenset()
+        self.floor_z = 0.0
         # latest capture, kept for /camera/<id>/frame.jpg and diagnostics.
         # Plain reference swaps — readers on other threads get a coherent
         # (frame, ts, detections) at worst one poll stale.
@@ -156,6 +160,10 @@ class CameraSensor(SensorAdapter):
                 self.geometry, {}, auto_correct=self.anchor_correct
             )
         return self.calibrator
+
+    def attach_presence_labels(self, labels) -> None:
+        """Detector classes to treat as occupants (feet-on-floor projection)."""
+        self._presence_labels = frozenset(labels or ())
 
     def attach_movables(self, registry) -> None:
         """Share the tracker-wide movable registry (doors/drawers)."""
@@ -191,7 +199,16 @@ class CameraSensor(SensorAdapter):
             self.frame_source.stop()
 
     def to_observation(self, det: Detection, ts: float) -> Observation | None:
-        u, v = det.center
+        # occupants are localized from their feet (bbox bottom-center) on
+        # the floor; items from their centroid on the configured surface
+        presence = not det.tag_id and det.label in self._presence_labels
+        if presence:
+            x, y, w, h = det.bbox
+            u, v = x + w / 2.0, y + h
+            plane_z, sigma_scale = self.floor_z, 2.0
+        else:
+            u, v = det.center
+            plane_z, sigma_scale = self.surface_z, 1.0
         if self.mode == "ray":
             return BearingObservation(
                 sensor_id=self.sensor_id,
@@ -203,7 +220,7 @@ class CameraSensor(SensorAdapter):
                 direction=self.geometry.ray(u, v),
                 sigma_rad=self.bearing_sigma_rad,
             )
-        pos = self.geometry.project_to_plane(u, v, self.surface_z)
+        pos = self.geometry.project_to_plane(u, v, plane_z)
         if pos is None:
             return None
         # uncertainty grows with distance from the camera
@@ -215,7 +232,7 @@ class CameraSensor(SensorAdapter):
             label=det.label,
             confidence=det.confidence,
             position=pos,
-            sigma_m=self.base_sigma_m * max(d, 1.0),
+            sigma_m=self.base_sigma_m * max(d, 1.0) * sigma_scale,
         )
 
     def overlay(self) -> dict:

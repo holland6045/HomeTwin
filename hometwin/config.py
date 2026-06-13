@@ -168,6 +168,8 @@ def load_config(path: str | Path) -> AppConfig:
                 discovery_prefix=ha_cfg.get("discovery_prefix", "homeassistant"),
             )
 
+    tracker = raw.get("tracker", {})
+    presence_labels = frozenset(tracker.get("presence_labels", ["person"]))
     for sensor in sensors:
         if anchors and hasattr(sensor, "attach_anchors"):
             sensor.attach_anchors(anchors)
@@ -175,8 +177,9 @@ def load_config(path: str | Path) -> AppConfig:
             sensor.attach_movables(movables)
         if device_tags is not None and hasattr(sensor, "attach_device_tags"):
             sensor.attach_device_tags(device_tags)
+        if hasattr(sensor, "attach_presence_labels"):
+            sensor.attach_presence_labels(presence_labels)
 
-    tracker = raw.get("tracker", {})
     api = raw.get("api", {})
     return AppConfig(
         world=world,
@@ -191,7 +194,7 @@ def load_config(path: str | Path) -> AppConfig:
         state_path=tracker.get("state_path"),
         save_interval_s=float(tracker.get("save_interval_s", 30.0)),
         parallel_polling=bool(tracker.get("parallel_polling", True)),
-        presence_labels=frozenset(tracker.get("presence_labels", ["person"])),
+        presence_labels=presence_labels,
         presence_stale_after_s=float(tracker.get("presence_stale_after_s", 12.0)),
         anchors=anchors,
         movables=movables,
