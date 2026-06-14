@@ -64,8 +64,9 @@ function Stop-Tracker {
     if (Test-Path $PidFile) {
         Stop-Process -Id (Get-Content $PidFile) -Force -ErrorAction SilentlyContinue
         Remove-Item $PidFile -ErrorAction SilentlyContinue
-        Start-Sleep -Seconds 1
     }
+    Get-Process hometwin -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 2  # let Windows release the hometwin.exe handle
 }
 
 $AutoFile = Join-Path $Support "autoupdate"
@@ -86,7 +87,9 @@ if (-not (Test-Path (Join-Path $Venv "Scripts\python.exe"))) {
     } else { "none" }
     if ($Remote -and $Remote -ne $Local) {
         Say "update available: $Local -> $Remote"
-        try { Install-Update $Remote; Stop-Tracker }  # restart so new code is live
+        # stop first: pip can't overwrite a running hometwin.exe (WinError 32)
+        Stop-Tracker
+        try { Install-Update $Remote }
         catch { Say "update failed, keeping $Local : $_" }
     }
 }

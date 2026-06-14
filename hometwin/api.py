@@ -706,14 +706,24 @@ def make_handler(tracker: Tracker, policy: AuthPolicy):
                                               "(HOMETWIN_REPO/HOMETWIN_CHANNEL unset) — "
                                               "relaunch the app to update instead"})
                     return
-                # --no-deps: compiled dependency files are locked while we
-                # run (Windows); the launcher's full reinstall covers
-                # dependency bumps. This path is for code-only updates.
-                proc = subprocess.run(
-                    [sys.executable, "-m", "pip", "install", "--upgrade",
-                     "--force-reinstall", "--no-deps",
-                     f"hometwin @ git+{repo}@{channel}"],
-                    capture_output=True, text=True, timeout=600)
+                spec = f"hometwin @ git+{repo}@{channel}"
+                pip = [sys.executable, "-m", "pip", "install", "--upgrade",
+                       "--force-reinstall", "--no-deps", spec]
+                if os.name == "nt":
+                    # Windows can't overwrite the running hometwin.exe, so hand
+                    # off to a detached python that waits for us to exit, then
+                    # installs and relaunches the same command.
+                    relaunch = [sys.argv[0], *sys.argv[1:]]
+                    code = ("import time,subprocess;time.sleep(3);"
+                            f"subprocess.run({pip!r});"
+                            f"subprocess.Popen({relaunch!r})")
+                    subprocess.Popen([sys.executable, "-c", code], creationflags=0x00000208)
+                    self._send(200, {"status": "update",
+                                     "note": "updating in the background — reconnecting shortly"})
+                    threading.Thread(target=_exit_process,
+                                     args=(tracker, self.server, False), daemon=True).start()
+                    return
+                proc = subprocess.run(pip, capture_output=True, text=True, timeout=600)
                 if proc.returncode != 0:
                     self._send(500, {"error": "pip install failed",
                                      "log": (proc.stdout + proc.stderr)[-2000:]})
