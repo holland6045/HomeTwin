@@ -51,9 +51,10 @@
   #view-wrap { position:relative; flex:1 1 640px; min-width:460px; background:#070809;
     border-radius:var(--radius); overflow:hidden; aspect-ratio:4/3;
     border:1px solid var(--line); }
-  /* fill (stretch): the camera-overlay canvas maps normalized coords across
-     the full box, so the video must fill it for annotations to register */
-  #stream, #depth-overlay { position:absolute; inset:0; width:100%; height:100%; object-fit:fill; }
+  /* contain (true aspect, letterboxed): the camera-overlay canvas maps
+     normalized coords into the displayed image rectangle (see letterbox()),
+     so annotations register to the frame regardless of camera aspect */
+  #stream, #depth-overlay { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; }
   #depth-overlay { display:none; opacity:.7; mix-blend-mode:screen; }
   #canvas { position:absolute; inset:0; width:100%; height:100%; }
   #splat-wrap { display:none; position:absolute; inset:0; }
@@ -455,10 +456,20 @@ function renderMap(d) {
   }
 }
 
+/* normalized image coords -> the letterboxed content rectangle, matching
+   object-fit:contain on the <img>. With no known aspect, fills the box. */
+function letterbox(W, H, aspect) {
+  if (!aspect) return [0, 0, W, H];
+  let w = W, h = W / aspect;
+  if (aspect < W / H) { h = H; w = H * aspect; }
+  return [(W - w) / 2, (H - h) / 2, w, h];
+}
+
 /* ---------- camera view ---------- */
 function renderCamera(d) {
   const W = canvas.width, H = canvas.height;
-  const P = pt => [pt[0] * W, pt[1] * H];
+  const [ox, oy, w, h] = letterbox(W, H, d.aspect);
+  const P = pt => [ox + pt[0] * w, oy + pt[1] * h];
 
   if (on("heat")) for (const c of d.heat) {
     ctx.fillStyle = heatColor(c.v, 0.45);
@@ -495,7 +506,7 @@ function renderCamera(d) {
     const stale = it.status === "stale";
     ctx.strokeStyle = stale ? "rgba(224,162,60,0.6)" : "rgba(78,161,255,0.7)";
     ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.arc(x, y, Math.max(it.sigma_u * W, 6), 0, 7); ctx.stroke();
+    ctx.beginPath(); ctx.arc(x, y, Math.max(it.sigma_u * w, 6), 0, 7); ctx.stroke();
     ctx.fillStyle = stale ? "#e0a23c" : "#4ea1ff";
     ctx.font = "13px system-ui";
     ctx.fillText(`${it.name} (${it.age_s}s)`, x + 10, y - 8);

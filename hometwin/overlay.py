@@ -297,10 +297,16 @@ def camera_overlay(tracker, sensor_id: str) -> dict | None:
                 "zone": tracker.presence["zone"],
             }
 
+    # frame aspect (w/h) lets the client letterbox the overlay to the real
+    # image rectangle — essential once cameras of differing aspects coexist
+    shape = getattr(getattr(camera, "last_frame", None), "shape", None)
+    aspect = (shape[1] / shape[0]) if shape else None
+
     return {
         "timestamp": now,
         "sensor_id": sensor_id,
         "stream_url": camera.overlay().get("stream_url"),
+        "aspect": round(aspect, 4) if aspect else None,
         "items": items,
         "heat": heat,
         "rings": rings,

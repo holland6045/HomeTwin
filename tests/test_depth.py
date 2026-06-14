@@ -152,3 +152,24 @@ def test_depth_jpg_endpoint(tmp_path):
             assert r.read(2)[:2] == b"\xff\xd8"  # JPEG
     finally:
         api.stop()
+
+
+def test_camera_overlay_reports_frame_aspect():
+    """The letterbox foundation: camera_overlay exposes the frame's aspect
+    (w/h) so the client maps overlays into the displayed image rectangle."""
+    from hometwin.config import AppConfig
+    from hometwin.items import ItemRegistry
+    from hometwin.overlay import camera_overlay
+    from hometwin.tracker import Tracker
+    from hometwin.world import World, Zone
+
+    class Det:
+        def detect(self, frame):
+            return []
+
+    cam = _camera(detector=Det())  # Frames -> 48x64 -> aspect 64/48
+    tr = Tracker(AppConfig(world=World([Zone("r", (0, 0, 0), (5, 5, 3))]),
+                           items=ItemRegistry(), sensors=[cam]))
+    assert camera_overlay(tr, "cam")["aspect"] is None  # no frame captured yet
+    tr.step()
+    assert camera_overlay(tr, "cam")["aspect"] == pytest.approx(64 / 48, abs=1e-3)

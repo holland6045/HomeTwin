@@ -329,6 +329,11 @@ def make_handler(tracker: Tracker, policy: AuthPolicy):
             norm = (dmap - lo) / (hi - lo + 1e-6)
             u8 = (norm * 255).astype(np.uint8)
             color = cv2.applyColorMap(u8, cv2.COLORMAP_INFERNO)
+            # the depth map is square (model resolution); stretch it back to
+            # the frame's aspect so it overlays the video 1:1 under letterbox
+            frame = getattr(cam, "last_frame", None)
+            if frame is not None:
+                color = cv2.resize(color, (frame.shape[1], frame.shape[0]))
             ok, buf = cv2.imencode(".jpg", color, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
             if not ok:
                 self._send(500, {"error": "JPEG encode failed"})
