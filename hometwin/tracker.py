@@ -474,10 +474,21 @@ class Tracker:
         period = 1.0 / self.cfg.poll_hz
         self.start_sensors()
         last_save = time.monotonic()
+        errors = 0
         try:
             while not self._stop.is_set():
                 t0 = time.monotonic()
-                self.step()
+                # fail-safe: a bad frame/step must not take the whole tracker
+                # (and the dashboard/diagnostics) down. Log it and keep going.
+                try:
+                    self.step()
+                    errors = 0
+                except Exception:
+                    errors += 1
+                    log.exception("tracker step failed (%d in a row)", errors)
+                    if errors >= 100:
+                        log.error("100 consecutive step failures — stopping")
+                        raise
                 if self.store and t0 - last_save >= self.cfg.save_interval_s:
                     self.save_state()
                     last_save = t0

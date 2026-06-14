@@ -197,3 +197,25 @@ def _await_frame(src, tries=100):
             return f
         time.sleep(0.02)
     return None
+
+
+def test_debug_bundle_includes_log_tails(tmp_path, monkeypatch):
+    import io
+    import zipfile
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "logs").mkdir()
+    (tmp_path / "logs" / "tracker.log").write_text("BOOM traceback example\n")
+    from hometwin.api import ApiServer
+
+    tracker, _ = make_tracker()
+    api = ApiServer(tracker, "127.0.0.1", 0)
+    api.start()
+    try:
+        with get(api, "/debug/bundle") as r:
+            body = r.read()
+    finally:
+        api.stop()
+    z = zipfile.ZipFile(io.BytesIO(body))
+    assert "logs/tracker.log" in z.namelist()
+    assert b"BOOM" in z.read("logs/tracker.log")

@@ -446,7 +446,10 @@ def make_handler(tracker: Tracker, policy: AuthPolicy):
                     if frame is None or (ts == last_sent_ts and now - last_sent_at < 0.5):
                         time.sleep(0.02)
                         continue
-                    ok, buf = cv2.imencode(".jpg", frame,
+                    # draw detection boxes so "did it find the tag" is obvious
+                    # regardless of camera-pose calibration
+                    shown = _annotate(frame, cam.last_detections) if cam.last_detections else frame
+                    ok, buf = cv2.imencode(".jpg", shown,
                                            [int(cv2.IMWRITE_JPEG_QUALITY), 80])
                     if ok:
                         body = buf.tobytes()
@@ -522,6 +525,20 @@ def make_handler(tracker: Tracker, policy: AuthPolicy):
                             z.writestr(f"camera_{sid}.jpg", jb.tobytes())
                     except Exception as e:
                         z.writestr(f"camera_{sid}.jpg.error.txt", repr(e))
+                # log tails: the last crash lands here even when it killed a
+                # previous run (logs persist across restarts)
+                from glob import glob
+
+                for lp in {"logs/tracker.log", "logs/tracker.err.log",
+                           "logs/tracker.out.log", *glob("logs/*.log")}:
+                    try:
+                        with open(lp, "rb") as f:
+                            f.seek(0, 2)
+                            f.seek(max(0, f.tell() - 200_000))
+                            z.writestr(f"logs/{os.path.basename(lp)}",
+                                       f.read().decode("utf-8", "replace"))
+                    except OSError:
+                        pass
             self._send_bytes(
                 buf.getvalue(), "application/zip",
                 f'attachment; filename="hometwin-diag-{int(time.time())}.zip"',

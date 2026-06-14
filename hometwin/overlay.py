@@ -307,6 +307,7 @@ def camera_overlay(tracker, sensor_id: str) -> dict | None:
         "sensor_id": sensor_id,
         "stream_url": camera.overlay().get("stream_url"),
         "aspect": round(aspect, 4) if aspect else None,
+        "detections": len(getattr(camera, "last_detections", [])),
         "items": items,
         "heat": heat,
         "rings": rings,

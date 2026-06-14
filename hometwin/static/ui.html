@@ -971,7 +971,8 @@ async function tick() {
       renderPanel(map.items, map.events);
       renderPeople(map.people);
       updateChips(map);
-      hint(`📷 ${state.view}` + (on("depth") ? " · depth overlay" : ""));
+      hint(`📷 ${state.view} · ${d.detections ?? 0} detections this frame`
+        + (on("depth") ? " · depth overlay" : ""));
     }
     render();
   } catch (e) { /* tracker restarting; retry next tick */ }

@@ -19,9 +19,21 @@ def _auth_headers(args) -> dict:
 
 
 def cmd_run(args) -> int:
+    import logging
+    from pathlib import Path
+
     from hometwin.api import ApiServer
     from hometwin.config import load_config
     from hometwin.tracker import Tracker
+
+    # log to stderr (captured by the launchers) and to logs/tracker.log, which
+    # the diagnostic bundle folds in — so a crash is recoverable even though
+    # the bundle button dies with the process
+    Path("logs").mkdir(exist_ok=True)
+    handlers = [logging.StreamHandler(),
+                logging.FileHandler("logs/tracker.log", encoding="utf-8")]
+    logging.basicConfig(level=logging.INFO, force=True, handlers=handlers,
+                        format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
     cfg = load_config(args.config)
     tracker = Tracker(cfg)
