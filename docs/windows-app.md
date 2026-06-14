@@ -62,20 +62,26 @@ The CLI from the launcher's venv is the same toolbox as always —
 `webcam-setup`, `make-anchor`, `make-tag`, `snapshot-map` all work
 against the launcher-managed install.
 
-## Enabling person detection (synthetic motion sensors)
+## Doing more than watching the webcam
 
-The install includes `onnxruntime`; the model is one command:
+A fresh install only runs ArUco tag detection, so with no printed tags in
+view nothing is tracked — just the video. Two one-click paths in the
+dashboard's **⚙ Settings** get you to real tracking:
 
-```
-cd %LOCALAPPDATA%\HomeTwin
-venv\Scripts\hometwin.exe get-model rtdetr
-```
+- **Enable AI detection** (per camera): downloads RT-DETR (~80 MB, once)
+  and composes it onto the camera's detector via the `multi` detector, so
+  it tracks ArUco tags **and** people/objects (your phone is a COCO
+  class) at the same time. Person detections drive any motion zones you
+  draw on the map and appear in Home Assistant as PIRs.
+- **Make a tag**: enter an id/label and click *Open / print* — a printable
+  ArUco SVG opens in a new tab (Ctrl-P at 100%). Tape it to your keys and
+  put `tags: ["aruco:<id>"]` on that item in `config.yaml`.
+- **Detect modes**: probes the webcam's real resolutions/fps; pick one and
+  Apply (also `hometwin webcam-probe` from the CLI).
 
-then give a camera in `config.yaml` the detector
-`{type: rtdetr, model_path: models/rtdetr.onnx, conf_threshold: 0.5, interval_s: 0.5}`
-(keep ArUco on another camera entry, or run two camera blocks on the
-same device). Person detections drive any motion zones you draw on the
-map — each appears in Home Assistant as a PIR.
+CLI equivalents still work against the launcher venv: `get-model rtdetr`,
+`make-tag --id 7`, `webcam-probe`. GPU: reinstall with `[vision,ml-dml]`
+(DirectML) or `[vision,ml-cuda]` (NVIDIA) for fast inference.
 
 ## Remote debugging without remote access
 

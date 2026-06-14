@@ -345,84 +345,26 @@ def cmd_webcam_probe(args) -> int:
     best mode. Run once per camera, paste the output, forget about it.
     """
     try:
-        import cv2
+        import cv2  # noqa: F401
     except ImportError:
         print("webcam-probe requires opencv: pip install hometwin[vision]", file=sys.stderr)
         return 1
-    import time as _t
+    from hometwin.sensors.camera import probe_camera_modes
 
-    ladder = [(640, 480), (1280, 720), (1920, 1080), (2560, 1440), (3840, 2160)]
-    results = []  # (w, h, fps_measured, fourcc_label)
-    for fourcc in ("MJPG", None):
-        for w, h in ladder:
-            cap = cv2.VideoCapture(args.device)
-            if not cap.isOpened():
-                print(f"cannot open camera {args.device!r} — check the device index "
-                      "(try --device 1) and that no other app holds the camera",
-                      file=sys.stderr)
-                return 1
-            if fourcc:
-                cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*fourcc))
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
-            cap.set(cv2.CAP_PROP_FPS, 60)
-            ok, frame = cap.read()
-            if not ok:
-                cap.release()
-                continue
-            ah, aw = frame.shape[:2]
-            for _ in range(3):  # let exposure settle before timing
-                cap.read()
-            n, t0 = 0, _t.time()
-            while n < args.frames and _t.time() - t0 < 3.0:
-                if cap.read()[0]:
-                    n += 1
-            dt = max(_t.time() - t0, 1e-6)
-            cap.release()
-            mode = (aw, ah, round(n / dt, 1), fourcc or "default")
-            if not any(r[0] == aw and r[1] == ah and r[3] == mode[3] for r in results):
-                results.append(mode)
-                print(f"  {mode[3]:>7}  requested {w}x{h:<5} -> got {aw}x{ah} "
-                      f"@ {mode[2]} fps", file=sys.stderr)
-
-    if not results:
-        print("no mode delivered frames", file=sys.stderr)
+    modes = probe_camera_modes(args.device, frames=args.frames)
+    for m in modes:
+        print(f"  {m['fourcc']:>7}  {m['width']}x{m['height']} @ {m['fps']} fps "
+              f"(aspect {m['aspect']})", file=sys.stderr)
+    if not modes:
+        print(f"no mode delivered frames — check the device index (try --device 1) "
+              f"and that no other app holds camera {args.device!r}", file=sys.stderr)
         return 1
-    best = max(results, key=lambda r: (r[0] * r[1], r[2]))
-    print(f"\n# best mode — paste into the camera's source block:")
-    line = f"source: {{type: opencv, device: {args.device}, width: {best[0]}, " \
-           f"height: {best[1]}, fps: {int(best[2])}"
-    print(line + (f", fourcc: {best[3]}}}" if best[3] != "default" else "}"))
+    best = max(modes, key=lambda m: (m["width"] * m["height"], m["fps"]))
+    print("\n# best mode — paste into the camera's source block:")
+    line = (f"source: {{type: opencv, device: {args.device}, width: {best['width']}, "
+            f"height: {best['height']}, fps: {int(best['fps'])}")
+    print(line + (f", fourcc: {best['fourcc']}}}" if best["fourcc"] != "default" else "}"))
     return 0
-
-
-MODEL_ZOO = {
-    # pre-exported ONNX, no torch/optimum toolchain needed. RT-DETR r18vd
-    # is Apache-2.0 (PekingU), COCO classes; layout matches the rtdetr
-    # detector plugin. Variants trade accuracy for size/speed.
-    "rtdetr": {
-        "repo": "onnx-community/rtdetr_r18vd",
-        "files": {
-            "fp32": ("onnx/model.onnx",
-                     "11843b02455cc24009aed24d4c40db721b1093be5ccd6bbe7b9c441abb1d0558"),
-            "fp16": ("onnx/model_fp16.onnx", None),
-            "int8": ("onnx/model_int8.onnx", None),
-            "quantized": ("onnx/model_quantized.onnx", None),
-        },
-    },
-    # Depth Anything V2 small (Apache-2.0): relative inverse-depth, scaled
-    # to metric against a known fiducial for monocular 3D + a dense cloud.
-    "depth": {
-        "repo": "onnx-community/depth-anything-v2-small",
-        "files": {
-            "fp32": ("onnx/model.onnx",
-                     "afb6a5c28f3b6bf1618c6e43f02073ef9dfdc70e937502d51603e57b0a1df10c"),
-            "fp16": ("onnx/model_fp16.onnx", None),
-            "int8": ("onnx/model_int8.onnx", None),
-            "quantized": ("onnx/model_quantized.onnx", None),
-        },
-    },
-}
 
 
 def cmd_get_model(args) -> int:
@@ -431,41 +373,21 @@ def cmd_get_model(args) -> int:
     After download, point a camera at it and presence-class detections
     flow into motion zones (tracker.presence_labels defaults to person).
     """
-    import hashlib
-    import urllib.request
+    from hometwin.models import MODEL_ZOO, download_model
 
-    entry = MODEL_ZOO.get(args.model)
-    if entry is None:
+    if args.model not in MODEL_ZOO:
         print(f"unknown model {args.model!r}; available: {', '.join(MODEL_ZOO)}",
               file=sys.stderr)
         return 1
-    if args.variant not in entry["files"]:
-        print(f"unknown variant {args.variant!r}; available: "
-              f"{', '.join(entry['files'])}", file=sys.stderr)
+    print(f"downloading {args.model} [{args.variant}] ...", file=sys.stderr)
+    try:
+        out = download_model(args.model, args.variant, args.output,
+                             progress=lambda n: print(f"\r  {n / 1e6:.0f} MB",
+                                                      end="", file=sys.stderr))
+    except (KeyError, ValueError) as e:
+        print(f"\n{e}", file=sys.stderr)
         return 1
-    remote, sha = entry["files"][args.variant]
-    url = f"https://huggingface.co/{entry['repo']}/resolve/main/{remote}"
-    out = Path(args.output or f"models/{args.model}.onnx")
-    out.parent.mkdir(parents=True, exist_ok=True)
-    tmp = out.with_suffix(out.suffix + ".part")
-
-    print(f"downloading {entry['repo']} [{args.variant}] ...", file=sys.stderr)
-    digest = hashlib.sha256()
-    with urllib.request.urlopen(url, timeout=60) as r, open(tmp, "wb") as f:
-        done = 0
-        while chunk := r.read(1 << 20):
-            f.write(chunk)
-            digest.update(chunk)
-            done += len(chunk)
-            print(f"\r  {done / 1e6:.0f} MB", end="", file=sys.stderr)
-    print(file=sys.stderr)
-    if sha and digest.hexdigest() != sha:
-        tmp.unlink(missing_ok=True)
-        print(f"checksum mismatch — refusing the file (got {digest.hexdigest()})",
-              file=sys.stderr)
-        return 1
-    tmp.replace(out)
-    print(f"saved {out}", file=sys.stderr)
+    print(f"\nsaved {out}", file=sys.stderr)
     if args.model == "rtdetr":
         print(f"""
 # add to a camera in your config (interval_s throttles CPU inference):
@@ -782,6 +704,7 @@ def main(argv: list[str] | None = None) -> int:
     webp.add_argument("--dictionary", default="DICT_4X4_250")
     webp.set_defaults(fn=cmd_webcam_test)
 
+    from hometwin.models import MODEL_ZOO
     getm = sub.add_parser("get-model",
                           help="download a known-good ONNX detector (person detection)")
     getm.add_argument("model", choices=sorted(MODEL_ZOO), help="model name")

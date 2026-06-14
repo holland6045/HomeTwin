@@ -102,6 +102,8 @@ def load_config(path: str | Path) -> AppConfig:
         ov = sensor_overrides.get(str(c.get("id", c.get("type"))), {})
         if "source" in ov and isinstance(c.get("source"), dict):
             c["source"] = {**c["source"], **ov["source"]}
+        if "detector" in ov:  # dashboard-enabled AI detection, persisted
+            c["detector"] = ov["detector"]
         sensor_cfgs.append(c)
 
     world_cfg = raw.get("world", {})

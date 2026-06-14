@@ -128,6 +128,7 @@ class CameraSensor(SensorAdapter):
         )
         if frame_source is None and source:
             frame_source = create("frame_source", source.pop("type"), **source)
+        self.detector_cfg = dict(detector) if isinstance(detector, dict) else None
         if isinstance(detector, dict):
             cfg = dict(detector)
             detector = create("detector", cfg.pop("type"), **cfg)
@@ -216,6 +217,22 @@ class CameraSensor(SensorAdapter):
     def stop(self) -> None:
         if hasattr(self.frame_source, "stop"):
             self.frame_source.stop()
+
+    def probe_modes(self) -> list[dict]:
+        """Capture modes this camera's device supports. Only meaningful for a
+        local webcam (integer device); releases and reacquires it, so the
+        live feed blinks briefly."""
+        device = getattr(self.frame_source, "device", None)
+        if not isinstance(device, int):
+            return []
+        running = getattr(self.frame_source, "_cap", None) is not None
+        if running:
+            self.frame_source.stop()
+        try:
+            return probe_camera_modes(device)
+        finally:
+            if running:
+                self.frame_source.start()
 
     def to_observation(
         self, det: Detection, ts: float, metric_dist: float | None = None
@@ -497,6 +514,49 @@ class OpenCVFrameSource:
                 return None
             self._served_seq, frame = self._latest
         return frame
+
+
+def probe_camera_modes(device, frames: int = 12) -> list[dict]:
+    """Enumerate the capture modes a webcam actually delivers: walk a
+    resolution ladder with and without MJPG, measure real fps, and report
+    distinct {width, height, fps, fourcc, aspect} the hardware honored.
+    Opens/closes the device — don't call while it's in active use."""
+    import time as _t
+
+    import cv2
+
+    ladder = [(640, 480), (1280, 720), (1920, 1080), (2560, 1440), (3840, 2160)]
+    out: list[dict] = []
+    for fourcc in ("MJPG", None):
+        for w, h in ladder:
+            cap = cv2.VideoCapture(device)
+            if not cap.isOpened():
+                cap.release()
+                return out
+            if fourcc:
+                cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*fourcc))
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
+            cap.set(cv2.CAP_PROP_FPS, 60)
+            ok, frame = cap.read()
+            if not ok:
+                cap.release()
+                continue
+            ah, aw = frame.shape[:2]
+            for _ in range(3):  # let exposure settle before timing
+                cap.read()
+            n, t0 = 0, _t.time()
+            while n < frames and _t.time() - t0 < 3.0:
+                if cap.read()[0]:
+                    n += 1
+            cap.release()
+            label = fourcc or "default"
+            mode = {"width": aw, "height": ah, "fps": round(n / max(_t.time() - t0, 1e-6), 1),
+                    "fourcc": label, "aspect": round(aw / ah, 3)}
+            if not any(m["width"] == aw and m["height"] == ah and m["fourcc"] == label
+                       for m in out):
+                out.append(mode)
+    return out
 
 
 @register("frame_source", "static")

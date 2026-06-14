@@ -52,6 +52,7 @@ _BUILTIN_MODULES = (
     "hometwin.detectors.aruco",
     "hometwin.detectors.onnx",
     "hometwin.detectors.rtdetr",
+    "hometwin.detectors.multi",
     "hometwin.depth",
     "hometwin.training.trainers",
 )

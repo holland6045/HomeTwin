@@ -116,6 +116,17 @@
 <div id="settings">
   <div class="card" id="settings-card">
     <h2>Cameras</h2><div id="cam-config"></div>
+    <h2 style="margin-top:16px">Make a tag</h2>
+    <div class="fields">
+      <label>id<input id="tag-id" value="7"></label>
+      <label>label<input id="tag-ident" placeholder="KEY/01" style="width:84px"></label>
+      <label>caption<input id="tag-caption" placeholder="house keys" style="width:120px"></label>
+      <label>size mm<input id="tag-size" value="70"></label>
+      <label>layout<select id="tag-layout"><option value="portrait">portrait</option>
+        <option value="wide">wide</option></select></label>
+      <button class="btn" id="tag-make">Open / print</button>
+    </div>
+    <div class="muted" id="tag-hint">print at 100% scale, then add the printed id to an item's <code>tags</code> in config.</div>
     <h2 style="margin-top:16px">System</h2>
     <div class="sysrow">
       <button class="btn" id="sys-restart">Restart</button>
@@ -1024,6 +1035,22 @@ settings.addEventListener("click", (e) => {
 document.getElementById("settings-close").onclick = () => { settings.style.display = "none"; };
 function sMsg(t) { document.getElementById("settings-msg").textContent = t; }
 
+document.getElementById("tag-make").onclick = () => {
+  const id = encodeURIComponent(document.getElementById("tag-id").value || "0");
+  const q = new URLSearchParams({
+    id: document.getElementById("tag-id").value || "0",
+    ident: document.getElementById("tag-ident").value || "",
+    caption: document.getElementById("tag-caption").value || "",
+    size_mm: document.getElementById("tag-size").value || "70",
+    layout: document.getElementById("tag-layout").value,
+  });
+  const t = localStorage.getItem("api_token");
+  if (t) q.set("token", t);
+  window.open("/make-tag?" + q.toString(), "_blank");
+  document.getElementById("tag-hint").textContent =
+    `opened tag ${id} in a new tab — Ctrl/Cmd-P to print at 100%. Config: tags: ["aruco:${id}"]`;
+};
+
 async function loadCamConfig() {
   const el = document.getElementById("cam-config");
   el.textContent = "loading…";
@@ -1034,11 +1061,13 @@ async function loadCamConfig() {
   if (!cams.length) el.textContent = "no cameras configured";
   for (const c of cams) {
     const cap = c.capture || {}, n = cap.negotiated || {}, req = cap.requested || {};
+    const sid = c.sensor_id;
+    const depth = c.depth ? ` · depth ${c.depth.ready ? "ready" : "calibrating"}` : "";
     const row = document.createElement("div");
     row.className = "cam-cfg";
-    row.innerHTML = `<b>${c.sensor_id}</b>
+    row.innerHTML = `<b>${sid}</b>
       <div class="now">delivering ${n.width ?? "?"}x${n.height ?? "?"} @ ${n.fps ?? "?"} fps`
-      + ` (${n.fourcc || "default format"}, ${n.backend || "?"})</div>
+      + ` (${n.fourcc || "default format"}, ${n.backend || "?"}) · detector ${c.detector}${depth}</div>
       <div class="fields">
         <label>device<input name="device" value="${cap.device ?? 0}"></label>
         <label>width<input name="width" value="${req.width ?? n.width ?? ""}"></label>
@@ -1047,24 +1076,63 @@ async function loadCamConfig() {
         <label>format<select name="fourcc">
           <option value="MJPG">MJPG</option><option value="YUY2">YUY2</option>
           <option value="">default</option></select></label>
-        <button>Apply</button>
+        <button class="btn apply">Apply</button>
+      </div>
+      <div class="fields" style="margin-top:7px">
+        <label>detected modes<select class="modes" style="width:auto"><option value="">— detect —</option></select></label>
+        <button class="btn detect">Detect modes</button>
+        <span class="spacer"></span>
+        <button class="btn ai">${c.ai ? "AI detection on ✓" : "Enable AI detection"}</button>
       </div>`;
-    row.querySelector("select").value = req.fourcc ?? "MJPG";
-    row.querySelector("button").onclick = async () => {
+    row.querySelector("select[name=fourcc]").value = req.fourcc ?? "MJPG";
+    const post = (path, body) => fetch(`/config/cameras/${encodeURIComponent(sid)}${path}`, {
+      method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify(body) });
+    row.querySelector(".apply").onclick = async () => {
       const body = {};
-      for (const f of row.querySelectorAll("input, select")) body[f.name] = f.value;
+      for (const f of row.querySelectorAll(".fields:first-of-type input, .fields:first-of-type select"))
+        body[f.name] = f.value;
       sMsg("applying — the camera re-opens, give it a second…");
       try {
-        const r = await fetch(`/config/cameras/${encodeURIComponent(c.sensor_id)}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", ...authHeaders() },
-          body: JSON.stringify(body),
-        });
-        const out = await r.json();
+        const r = await post("", body); const out = await r.json();
         if (!r.ok) { sMsg(out.error || "failed"); return; }
         const got = out.capture.negotiated;
         sMsg(`camera negotiated ${got.width}x${got.height} @ ${got.fps} fps — saved`);
         loadCamConfig();
+      } catch (e) { sMsg("no response from tracker"); }
+    };
+    row.querySelector(".detect").onclick = async () => {
+      sMsg("probing the camera — the feed will blink…");
+      try {
+        const r = await authFetch(`/config/cameras/${encodeURIComponent(sid)}/modes`);
+        const { modes } = await r.json();
+        const sel = row.querySelector(".modes");
+        sel.innerHTML = `<option value="">${modes.length} modes — pick one</option>`;
+        for (const m of modes) {
+          const o = document.createElement("option");
+          o.value = JSON.stringify(m);
+          o.textContent = `${m.width}x${m.height} @${m.fps} ${m.fourcc}`;
+          sel.append(o);
+        }
+        sel.onchange = () => {
+          if (!sel.value) return;
+          const m = JSON.parse(sel.value);
+          row.querySelector("[name=width]").value = m.width;
+          row.querySelector("[name=height]").value = m.height;
+          row.querySelector("[name=fps]").value = Math.round(m.fps);
+          row.querySelector("[name=fourcc]").value = m.fourcc === "default" ? "" : m.fourcc;
+        };
+        sMsg(`found ${modes.length} capture modes — pick one, then Apply`);
+      } catch (e) { sMsg("probe failed (camera busy?)"); }
+    };
+    row.querySelector(".ai").onclick = async () => {
+      sMsg("downloading the detection model (first time ~80 MB) and enabling…");
+      try {
+        const r = await post("/detector", { enable_ai: true });
+        const out = await r.json();
+        sMsg(r.ok ? "AI detection on — people & objects (e.g. phone) now tracked"
+                  : (out.error || "failed"));
+        if (r.ok) loadCamConfig();
       } catch (e) { sMsg("no response from tracker"); }
     };
     el.appendChild(row);

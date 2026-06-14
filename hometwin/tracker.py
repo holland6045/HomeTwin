@@ -616,6 +616,45 @@ class Tracker:
         self._persist_override(sensor_id, "source", merged)
         return new.describe()
 
+    def reconfigure_detector(self, sensor_id: str, detector_cfg: dict) -> None:
+        """Hot-swap a camera's detector and persist it to the config sidecar.
+        Raises KeyError for unknown cameras."""
+        from hometwin import registry
+
+        cam = next((s for s in self.sensors
+                    if getattr(s, "sensor_id", None) == sensor_id
+                    and hasattr(s, "detector")), None)
+        if cam is None:
+            raise KeyError(f"unknown camera {sensor_id!r}")
+        cfg = dict(detector_cfg)
+        new = registry.create("detector", dict(cfg).pop("type"), **{k: v for k, v in cfg.items() if k != "type"})
+        with self._lock:
+            cam.detector = new
+            cam.detector_cfg = cfg
+        self._persist_override(sensor_id, "detector", cfg)
+
+    def enable_ai_detection(self, sensor_id: str, model_path: str) -> dict:
+        """Compose RT-DETR object detection onto a camera's existing detector
+        (via the `multi` detector) so it tracks tags AND people/objects.
+        Returns the resulting detector cfg. Idempotent."""
+        cam = next((s for s in self.sensors
+                    if getattr(s, "sensor_id", None) == sensor_id
+                    and hasattr(s, "detector")), None)
+        if cam is None:
+            raise KeyError(f"unknown camera {sensor_id!r}")
+        rtdetr = {"type": "rtdetr", "model_path": model_path,
+                  "conf_threshold": 0.5, "interval_s": 0.5}
+        base = cam.detector_cfg or {"type": "aruco", "dictionary": "DICT_4X4_250"}
+        if base.get("type") == "multi":
+            subs = [d for d in base.get("detectors", []) if d.get("type") != "rtdetr"]
+            new_cfg = {"type": "multi", "detectors": [*subs, rtdetr]}
+        elif base.get("type") == "rtdetr":
+            new_cfg = rtdetr
+        else:
+            new_cfg = {"type": "multi", "detectors": [base, rtdetr]}
+        self.reconfigure_detector(sensor_id, new_cfg)
+        return new_cfg
+
     def _persist_override(self, sensor_id: str, key: str, value) -> None:
         path = getattr(self.cfg, "overrides_path", None)
         if not path:

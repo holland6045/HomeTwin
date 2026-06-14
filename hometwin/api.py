@@ -19,9 +19,14 @@ GET  /debug/bundle     -> zip of everything needed to debug remotely:
                           state + annotated frames
 GET  /config/cameras   -> capture settings per camera (requested vs
                           negotiated mode)
+GET  /config/cameras/<sensor_id>/modes -> capture modes the webcam supports
+GET  /make-tag?id=&ident=&caption=&size_mm=&layout= -> printable tag SVG
 POST /config/cameras/<sensor_id> -> {device?, width?, height?, fps?,
                           fourcc?} hot-swap capture settings; persisted
                           to <config>.overrides.json
+POST /config/cameras/<sensor_id>/detector -> {enable_ai: true} (download
+                          RT-DETR + compose onto the detector) or
+                          {detector: {...}}; persisted
 POST /system/restart   -> respawn the tracker process (state saved)
 POST /system/update    -> pip-reinstall hometwin from the update channel
                           (HOMETWIN_REPO/HOMETWIN_CHANNEL env), then respawn
@@ -108,6 +113,27 @@ def _version() -> str:
         return version("hometwin")
     except Exception:
         return "unknown"
+
+
+def _has_ai(detector_cfg) -> bool:
+    """True if the camera's detector runs an ONNX object detector."""
+    if not detector_cfg:
+        return False
+    t = detector_cfg.get("type")
+    if t in ("rtdetr", "onnx"):
+        return True
+    if t == "multi":
+        return any(_has_ai(d) for d in detector_cfg.get("detectors", []))
+    return False
+
+
+def _detector_summary(detector_cfg) -> str:
+    if not detector_cfg:
+        return "unknown"
+    t = detector_cfg.get("type")
+    if t == "multi":
+        return "+".join(d.get("type", "?") for d in detector_cfg.get("detectors", []))
+    return t or "unknown"
 
 
 def _exit_process(tracker, server, relaunch: bool) -> None:
@@ -259,9 +285,22 @@ def make_handler(tracker: Tracker, policy: AuthPolicy):
                         "stream_url": s.stream_url,
                         "capture": (s.frame_source.describe()
                                     if hasattr(s.frame_source, "describe") else None),
+                        "detector": _detector_summary(getattr(s, "detector_cfg", None)),
+                        "ai": _has_ai(getattr(s, "detector_cfg", None)),
+                        "depth": s.depth_scale.status() if getattr(s, "depth", None) else None,
                     }
                     for s in tracker.sensors if hasattr(s, "frame_source")
                 ])
+            elif len(parts) == 4 and parts[:2] == ["config", "cameras"] and parts[3] == "modes":
+                cam = next((s for s in tracker.sensors
+                            if getattr(s, "sensor_id", None) == parts[2]
+                            and hasattr(s, "probe_modes")), None)
+                if cam is None:
+                    self._send(404, {"error": "unknown camera"})
+                else:
+                    self._send(200, {"modes": cam.probe_modes()})
+            elif parts == ["make-tag"]:
+                self._make_tag(parse_qs(urlsplit(self.path).query))
             elif parts == ["items"]:
                 self._send(200, tracker.snapshot())
             elif len(parts) == 2 and parts[0] == "items":
@@ -339,6 +378,40 @@ def make_handler(tracker: Tracker, policy: AuthPolicy):
                 self._send(500, {"error": "JPEG encode failed"})
                 return
             self._send_bytes(buf.tobytes(), "image/jpeg")
+
+        def _make_tag(self, qs: dict) -> None:
+            """Printable ArUco label SVG — the in-app tag maker. ?id=7&
+            ident=KEY/01&caption=keys&size_mm=70&layout=square|wide&palette=…"""
+            try:
+                from hometwin.tags import marker_bits, tag_svg
+            except Exception as e:
+                self._send(503, {"error": f"tag maker unavailable: {e}"})
+                return
+            try:
+                mid = int(qs.get("id", ["0"])[0])
+            except ValueError:
+                self._send(400, {"error": "id must be an integer"})
+                return
+            dictionary = qs.get("dictionary", ["DICT_4X4_250"])[0]
+            try:
+                bits = marker_bits(dictionary, mid)
+                twin_bits = None
+                if qs.get("twin_id"):
+                    twin_bits = marker_bits(dictionary, int(qs["twin_id"][0]))
+                svg = tag_svg(
+                    bits, qs.get("ident", [f"TAG/{mid:02d}"])[0],
+                    caption=qs.get("caption", [""])[0],
+                    palette=qs.get("palette", ["signal"])[0],
+                    size_mm=float(qs.get("size_mm", ["70"])[0]),
+                    layout=qs.get("layout", ["portrait"])[0],
+                    twin=qs.get("twin", ["false"])[0] in ("1", "true"),
+                    twin_bits=twin_bits,
+                )
+            except (RuntimeError, ValueError, KeyError) as e:
+                self._send(400, {"error": str(e)})
+                return
+            self._send_bytes(svg.encode(), "image/svg+xml",
+                             f'inline; filename="tag-{mid}.svg"')
 
         def _stream_mjpg(self, sensor_id: str) -> None:
             """Multipart MJPEG of the camera's retained frames. Runs at the
@@ -535,6 +608,32 @@ def make_handler(tracker: Tracker, policy: AuthPolicy):
                     return
                 tracker.add_anchor(tag, position)
                 self._send(200, {"status": "anchored", "tag": tag})
+            elif len(parts) == 4 and parts[:2] == ["config", "cameras"] and parts[3] == "detector":
+                length = int(self.headers.get("Content-Length", 0))
+                try:
+                    body = json.loads(self.rfile.read(length) or b"{}")
+                except json.JSONDecodeError:
+                    self._send(400, {"error": "invalid JSON"})
+                    return
+                try:
+                    if body.get("enable_ai"):
+                        from hometwin.models import download_model
+
+                        path = str(download_model("rtdetr", body.get("variant", "fp32")))
+                        cfg = tracker.enable_ai_detection(parts[2], path)
+                    elif "detector" in body:
+                        tracker.reconfigure_detector(parts[2], body["detector"])
+                        cfg = body["detector"]
+                    else:
+                        self._send(400, {"error": "need {enable_ai: true} or {detector: {...}}"})
+                        return
+                except KeyError as e:
+                    self._send(404, {"error": str(e.args[0])})
+                    return
+                except Exception as e:
+                    self._send(500, {"error": str(e)})
+                    return
+                self._send(200, {"status": "applied", "detector": cfg})
             elif len(parts) == 3 and parts[:2] == ["config", "cameras"]:
                 length = int(self.headers.get("Content-Length", 0))
                 try:
