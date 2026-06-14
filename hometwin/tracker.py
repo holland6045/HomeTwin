@@ -609,8 +609,8 @@ class Tracker:
             raise KeyError(f"unknown camera {sensor_id!r}")
         old = cam.frame_source
         merged = {k: getattr(old, k)
-                  for k in ("device", "width", "height", "fps", "fourcc")
-                  if hasattr(old, k)}
+                  for k in ("device", "width", "height", "fps", "fourcc", "backend")
+                  if getattr(old, k, None) is not None}
         merged.update(source_cfg)
         new = registry.create("frame_source", "opencv", **merged)
         # release the device before the replacement opens it (Windows capture

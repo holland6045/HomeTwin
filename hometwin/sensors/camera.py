@@ -418,10 +418,12 @@ class OpenCVFrameSource:
         fps: float | None = None,
         fourcc: str | None = None,
         threaded: bool = True,
+        backend: str | None = None,  # "dshow"|"msmf"|"v4l2"|"any"; default per-OS
     ):
         self.device = device
         self.width, self.height, self.fps, self.fourcc = width, height, fps, fourcc
         self.threaded = threaded
+        self.backend = backend
         self._cap = None
         self._thread = None
         self._stop = None
@@ -437,8 +439,26 @@ class OpenCVFrameSource:
             raise RuntimeError(
                 "frame_source 'opencv' requires opencv: pip install hometwin[vision]"
             ) from e
-        cap = cv2.VideoCapture(self.device)
-        if not cap.isOpened():
+        import sys
+
+        # backend matters on Windows: MSMF is the default but wedges on
+        # release/reacquire, so prefer DirectShow for local webcams and only
+        # fall back to MSMF/auto. Honor an explicit config override.
+        if self.backend:
+            order = [(self.backend.upper(),
+                      getattr(cv2, f"CAP_{self.backend.upper()}", cv2.CAP_ANY))]
+        elif isinstance(self.device, int) and sys.platform.startswith("win"):
+            order = [("DSHOW", cv2.CAP_DSHOW), ("MSMF", cv2.CAP_MSMF), ("ANY", cv2.CAP_ANY)]
+        else:
+            order = [("ANY", cv2.CAP_ANY)]
+        cap = None
+        for _name, flag in order:
+            c = cv2.VideoCapture(self.device, flag)
+            if c.isOpened():
+                cap = c
+                break
+            c.release()
+        if cap is None:
             raise RuntimeError(f"cannot open camera {self.device!r}")
         # fourcc first: switching to MJPG changes which modes are offered
         if self.fourcc:
