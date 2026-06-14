@@ -163,3 +163,37 @@ def test_mjpg_stream_endpoint():
         assert e.value.code == 404
     finally:
         api.stop()
+
+
+def test_capture_thread_self_heals_after_device_loss(tmp_path):
+    """A capture handle that dies mid-run (the Windows MSMF reacquire issue)
+    is dropped and reopened by the capture thread — no restart needed."""
+    import time
+
+    from hometwin.sensors.camera import OpenCVFrameSource
+
+    path = str(tmp_path / "clip.avi")
+    w = cv2.VideoWriter(path, cv2.VideoWriter_fourcc(*"MJPG"), 10, (64, 48))
+    for i in range(60):
+        w.write(np.full((48, 64, 3), i * 3, dtype=np.uint8))
+    w.release()
+
+    src = OpenCVFrameSource(device=path)
+    src.start()
+    try:
+        assert _await_frame(src) is not None
+        src._cap.release()  # yank the handle
+        assert _await_frame(src, tries=200) is not None  # thread reacquires
+    finally:
+        src.stop()
+    assert src.get_frame() is None
+
+
+def _await_frame(src, tries=100):
+    import time
+    for _ in range(tries):
+        f = src.get_frame()
+        if f is not None:
+            return f
+        time.sleep(0.02)
+    return None

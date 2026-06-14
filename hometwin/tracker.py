@@ -602,16 +602,17 @@ class Tracker:
                   if hasattr(old, k)}
         merged.update(source_cfg)
         new = registry.create("frame_source", "opencv", **merged)
-        # release the device before the replacement opens it (Windows
-        # capture is exclusive); roll back if the new mode won't open
+        # release the device before the replacement opens it (Windows capture
+        # is exclusive); roll back if the new mode won't open. start() defers
+        # to a self-healing thread and won't raise, so check the handle.
         if hasattr(old, "stop"):
             old.stop()
-        try:
-            new.start()
-        except Exception:
+        new.start()
+        if getattr(new, "_cap", "n/a") is None:
+            new.stop()
             if hasattr(old, "start"):
                 old.start()
-            raise
+            raise RuntimeError("camera rejected these settings (could not open)")
         cam.frame_source = new
         self._persist_override(sensor_id, "source", merged)
         return new.describe()

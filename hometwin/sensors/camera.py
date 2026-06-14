@@ -225,14 +225,15 @@ class CameraSensor(SensorAdapter):
         device = getattr(self.frame_source, "device", None)
         if not isinstance(device, int):
             return []
-        running = getattr(self.frame_source, "_cap", None) is not None
+        running = (getattr(self.frame_source, "_thread", None) is not None
+                   or getattr(self.frame_source, "_cap", None) is not None)
         if running:
             self.frame_source.stop()
         try:
             return probe_camera_modes(device)
         finally:
             if running:
-                self.frame_source.start()
+                self.frame_source.start()  # self-heals if the device is still settling
 
     def to_observation(
         self, det: Detection, ts: float, metric_dist: float | None = None
@@ -471,24 +472,46 @@ class OpenCVFrameSource:
         }
 
     def _capture_loop(self) -> None:
-        seq = 0
+        seq, fails = 0, 0
         while not self._stop.is_set():
-            ok, frame = self._cap.read()
+            if self._cap is None:  # (re)acquire: device lost, or a deferred open
+                try:
+                    self._cap = self._open()
+                except Exception:
+                    self._stop.wait(0.3)
+                    continue
+            try:
+                ok, frame = self._cap.read()
+            except Exception:
+                ok, frame = False, None
             if not ok:
-                self._stop.wait(0.05)  # camera hiccup; keep trying
+                fails += 1
+                if fails >= 30:  # ~1.5 s of failed reads: drop the wedged handle
+                    try:                 # so the next loop reacquires it. This is
+                        self._cap.release()  # the Windows MSMF reacquire-after-
+                    except Exception:        # release recovery path.
+                        pass
+                    self._cap, fails = None, 0
+                self._stop.wait(0.05)
                 continue
-            seq += 1
+            fails, seq = 0, seq + 1
             with self._lock:
                 self._latest = (seq, frame)
 
     def start(self) -> None:
         import threading
 
-        self._cap = self._open()
         if not self.threaded:
+            self._cap = self._open()
             return
         self._lock = threading.Lock()
         self._stop = threading.Event()
+        # open synchronously so describe()/reconfigure see the negotiated mode,
+        # but tolerate failure — the capture thread keeps retrying to acquire
+        try:
+            self._cap = self._open()
+        except Exception:
+            self._cap = None
         self._thread = threading.Thread(
             target=self._capture_loop, name=f"capture-{self.device}", daemon=True
         )
@@ -550,6 +573,7 @@ def probe_camera_modes(device, frames: int = 12) -> list[dict]:
                 if cap.read()[0]:
                     n += 1
             cap.release()
+            _t.sleep(0.2)  # let the driver fully release before the next open
             label = fourcc or "default"
             mode = {"width": aw, "height": ah, "fps": round(n / max(_t.time() - t0, 1e-6), 1),
                     "fourcc": label, "aspect": round(aw / ah, 3)}
