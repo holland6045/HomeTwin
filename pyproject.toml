@@ -6,7 +6,10 @@ build-backend = "setuptools.build_meta"
 name = "hometwin"
 version = "0.1.0"
 description = "HomeTwin: a sensor-fused digital twin of your apartment — locate tagged items, presence, and door/drawer state in real time"
-requires-python = ">=3.10"
+# 3.9 is macOS's stock Command Line Tools Python; the code is written to it
+# (lazy annotations, no match/runtime-unions) so the Mac app needs no extra
+# Python install. Newer is preferred and selected by the launchers.
+requires-python = ">=3.9"
 dependencies = ["PyYAML>=6.0"]
 
 [project.optional-dependencies]

@@ -80,6 +80,15 @@ if (-not (Test-Path (Join-Path $Venv "Scripts\python.exe"))) {
     try { Install-Update $target }
     catch { Alert "First install failed - see $Log"; exit 1 }
     if (-not (Test-Path $AutoFile)) { Set-Content $AutoFile "true" }
+} elseif (-not (Test-Path (Join-Path $Venv "Scripts\hometwin.exe"))) {
+    # venv exists but the package isn't installed (a prior failed install):
+    # self-heal by reinstalling regardless of the recorded commit
+    Say "hometwin missing from venv - reinstalling"
+    Stop-Tracker
+    $target = Remote-Commit
+    if (-not $target) { $target = "unknown" }
+    try { Install-Update $target }
+    catch { Alert "Reinstall failed - see $Log"; exit 1 }
 } elseif ((Get-Content $AutoFile -ErrorAction SilentlyContinue) -eq "true") {
     $Remote = Remote-Commit
     $Local = if (Test-Path (Join-Path $Support "installed-commit")) {

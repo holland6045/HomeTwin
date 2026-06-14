@@ -24,9 +24,15 @@ alert() {
     osascript -e "display alert \"HomeTwin\" message \"$1\"" >/dev/null 2>&1 || true
 }
 
-PY="$(command -v python3 || true)"
+PY=""
+for c in python3.13 python3.12 python3.11 python3.10 python3.9 python3; do
+    p="$(command -v "$c" 2>/dev/null)" || continue
+    if "$p" -c 'import sys; sys.exit(0 if sys.version_info[:2] >= (3, 9) else 1)' 2>/dev/null; then
+        PY="$p"; break
+    fi
+done
 if [ -z "$PY" ]; then
-    alert "python3 not found. Install Apple's Command Line Tools first: open Terminal and run: xcode-select --install"
+    alert "No Python 3.9+ found. Install Apple's Command Line Tools (Terminal: xcode-select --install) or Python from python.org, then reopen."
     exit 1
 fi
 
@@ -36,30 +42,56 @@ remote_commit() {
 
 install_or_update() {
     local target="$1"
-    say "installing hometwin@$CHANNEL ($target)"
-    "$VENV/bin/pip" install --quiet --upgrade --force-reinstall \
-        "hometwin[vision,ml] @ git+${REPO_URL}@${CHANNEL}" >>"$LOG" 2>&1
-    echo "$target" > "$SUPPORT/installed-commit"
+    say "installing hometwin@$CHANNEL ($target) with $("$VENV/bin/python" -V 2>&1)"
+    if "$VENV/bin/pip" install --quiet --upgrade --force-reinstall \
+            "hometwin[vision,ml] @ git+${REPO_URL}@${CHANNEL}" >>"$LOG" 2>&1; then
+        echo "$target" > "$SUPPORT/installed-commit"
+    else
+        say "pip install failed — see log"
+        return 1
+    fi
 }
+
+# a venv built with the wrong/old interpreter (e.g. a stale 3.9 venv that
+# rejected the package) is rebuilt from scratch
+venv_ok() {
+    [ -x "$VENV/bin/python" ] && "$VENV/bin/python" \
+        -c 'import sys; sys.exit(0 if sys.version_info[:2] >= (3, 9) else 1)' 2>/dev/null
+}
+if [ -d "$VENV" ] && ! venv_ok; then
+    say "rebuilding venv (incompatible interpreter)"
+    rm -rf "$VENV"
+fi
 
 if [ ! -x "$VENV/bin/pip" ]; then
     say "first run: creating venv"
     "$PY" -m venv "$VENV" >>"$LOG" 2>&1
     "$VENV/bin/pip" install --quiet --upgrade pip >>"$LOG" 2>&1
-    install_or_update "$(remote_commit || echo unknown)"
+    if ! install_or_update "$(remote_commit || echo unknown)"; then
+        alert "HomeTwin install failed — see ~/Library/Logs/HomeTwin/hometwin.log"
+        exit 1
+    fi
     [ -f "$SUPPORT/autoupdate" ] || echo "true" > "$SUPPORT/autoupdate"
+elif [ ! -x "$VENV/bin/hometwin" ]; then
+    # venv exists but the package isn't installed (a prior failed install):
+    # self-heal by reinstalling regardless of the recorded commit
+    say "hometwin missing from venv — reinstalling"
+    if ! install_or_update "$(remote_commit || echo unknown)"; then
+        alert "HomeTwin install failed — see ~/Library/Logs/HomeTwin/hometwin.log"
+        exit 1
+    fi
 elif [ "$(cat "$SUPPORT/autoupdate" 2>/dev/null)" = "true" ]; then
     REMOTE="$(remote_commit || true)"
     LOCAL="$(cat "$SUPPORT/installed-commit" 2>/dev/null || echo none)"
     if [ -n "$REMOTE" ] && [ "$REMOTE" != "$LOCAL" ]; then
         say "update available: $LOCAL -> $REMOTE"
-        install_or_update "$REMOTE"
-        # restart a running tracker so the new code is live
+        # stop a running tracker so the new code is live on next start
         if [ -f "$SUPPORT/hometwin.pid" ]; then
             kill "$(cat "$SUPPORT/hometwin.pid")" 2>/dev/null || true
             rm -f "$SUPPORT/hometwin.pid"
             sleep 1
         fi
+        install_or_update "$REMOTE" || say "update failed, keeping $LOCAL"
     fi
 fi
 
