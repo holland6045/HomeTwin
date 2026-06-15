@@ -24,17 +24,32 @@ alert() {
     osascript -e "display alert \"HomeTwin\" message \"$1\"" >/dev/null 2>&1 || true
 }
 
-PY=""
+# Pick the newest Python 3.9+. A .app launched from Finder gets only the
+# bare system PATH (/usr/bin:/bin), where the sole python3 is Apple's
+# 3.9.x — the user's python.org/Homebrew install isn't on it. So search the
+# real install locations explicitly, not just PATH.
+PY=""; PY_VER=0
+consider_py() {  # always returns 0 so a bad candidate can't abort (set -e)
+    [ -x "$1" ] || return 0
+    local v
+    v="$("$1" -c 'import sys;print(sys.version_info[0]*100+sys.version_info[1])' 2>/dev/null)" || return 0
+    case "$v" in ''|*[!0-9]*) return 0;; esac
+    if [ "$v" -ge 309 ] && [ "$v" -gt "$PY_VER" ]; then PY="$1"; PY_VER="$v"; fi
+    return 0
+}
+for p in /Library/Frameworks/Python.framework/Versions/3.*/bin/python3 \
+         /opt/homebrew/bin/python3.* /usr/local/bin/python3.* \
+         /opt/homebrew/bin/python3 /usr/local/bin/python3; do
+    consider_py "$p"
+done
 for c in python3.13 python3.12 python3.11 python3.10 python3.9 python3; do
-    p="$(command -v "$c" 2>/dev/null)" || continue
-    if "$p" -c 'import sys; sys.exit(0 if sys.version_info[:2] >= (3, 9) else 1)' 2>/dev/null; then
-        PY="$p"; break
-    fi
+    consider_py "$(command -v "$c" 2>/dev/null)"
 done
 if [ -z "$PY" ]; then
-    alert "No Python 3.9+ found. Install Apple's Command Line Tools (Terminal: xcode-select --install) or Python from python.org, then reopen."
+    alert "No Python 3.9+ found. Install Python from python.org (or Apple's Command Line Tools: xcode-select --install), then reopen."
     exit 1
 fi
+say "using $PY ($("$PY" -V 2>&1))"
 
 remote_commit() {
     git ls-remote "$REPO_URL" "refs/heads/$CHANNEL" 2>>"$LOG" | cut -f1
@@ -52,15 +67,16 @@ install_or_update() {
     fi
 }
 
-# a venv built with the wrong/old interpreter (e.g. a stale 3.9 venv that
-# rejected the package) is rebuilt from scratch
-venv_ok() {
-    [ -x "$VENV/bin/python" ] && "$VENV/bin/python" \
-        -c 'import sys; sys.exit(0 if sys.version_info[:2] >= (3, 9) else 1)' 2>/dev/null
-}
-if [ -d "$VENV" ] && ! venv_ok; then
-    say "rebuilding venv (incompatible interpreter)"
-    rm -rf "$VENV"
+# Rebuild the venv if it's unusable, below 3.9, or older than the
+# interpreter we just found — so a freshly installed newer Python is
+# adopted automatically (and a stale 3.9 venv from a failed run is replaced).
+if [ -d "$VENV" ]; then
+    cur="$("$VENV/bin/python" -c 'import sys;print(sys.version_info[0]*100+sys.version_info[1])' 2>/dev/null || echo 0)"
+    case "$cur" in ''|*[!0-9]*) cur=0;; esac
+    if [ "$cur" -lt 309 ] || [ "$cur" -lt "$PY_VER" ]; then
+        say "rebuilding venv (have $cur, selected $PY_VER)"
+        rm -rf "$VENV"
+    fi
 fi
 
 if [ ! -x "$VENV/bin/pip" ]; then
