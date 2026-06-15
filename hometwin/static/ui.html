@@ -5,113 +5,109 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>HomeTwin</title>
 <style>
-  /* retro-futuristic digital-brutalist terminal: monospace, square hard
-     edges, phosphor-amber/cyan on near-black, scanlines, uppercase. */
+  /* segmented-LCD / dot-matrix design language: pale sage-olive field, dark
+     olive "ink", a fine dot-grid texture, blocky monospace, monochrome. */
   :root {
-    --bg:#080a08; --panel:#0c0f0c; --panel2:#070907; --line:#1d2a1d;
-    --fg:#cfe0c8; --dim:#5f7a5c; --accent:#ffb000; --accent2:#46e3ff;
-    --ok:#5ef08a; --warn:#ffb000; --danger:#ff5f57; --person:#ff4fa3;
+    --bg:#aeb38f; --panel:#bcc09c; --panel2:#a7ac88; --line:#7c8062;
+    --ink:#2b2e20; --dim:#5e6248; --hi:#cdd0ab;
+    --ok:#2b2e20; --warn:#5e6248; --danger:#5a2f24; --person:#3a3322;
     --mono:"JetBrains Mono","Cascadia Code",ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace;
   }
   * { box-sizing: border-box; }
-  body { margin:0; background:var(--bg); color:var(--fg); font:13px/1.5 var(--mono);
-    letter-spacing:.01em; -webkit-font-smoothing:none; }
-  /* scanline + flicker overlay */
+  body { margin:0; background:var(--bg); color:var(--ink); font:13px/1.5 var(--mono);
+    letter-spacing:.02em; -webkit-font-smoothing:none; }
+  /* dot-matrix LCD texture: a faint pixel grid over everything */
   body::after { content:""; position:fixed; inset:0; pointer-events:none; z-index:50;
-    background:repeating-linear-gradient(0deg,#0000 0 2px,#00000038 2px 3px);
-    mix-blend-mode:multiply; }
+    background-image:radial-gradient(var(--ink) 0.5px, transparent 0.7px);
+    background-size:3px 3px; opacity:.10; }
   header { display:flex; align-items:center; gap:12px; padding:8px 14px;
-    background:var(--panel); border-bottom:1px solid var(--accent);
+    background:var(--panel); border-bottom:2px solid var(--ink);
     position:sticky; top:0; z-index:5; flex-wrap:wrap; }
-  .brand { font-size:14px; font-weight:700; text-transform:uppercase; letter-spacing:.18em;
-    margin-right:4px; color:var(--accent); text-shadow:0 0 8px #ffb00066; }
-  .brand b { color:var(--fg); }
+  .brand { font-size:15px; font-weight:800; text-transform:uppercase; letter-spacing:.22em;
+    margin-right:4px; color:var(--ink); text-shadow:1px 1px 0 var(--hi); }
+  .brand b { color:var(--ink); }
   #chips { display:flex; gap:6px; flex-wrap:wrap; }
   .chip { display:inline-flex; align-items:center; gap:6px; font-size:11px;
     text-transform:uppercase; letter-spacing:.06em; color:var(--dim);
     background:var(--panel2); border:1px solid var(--line); padding:3px 8px; white-space:nowrap; }
-  .chip b { color:var(--fg); font-weight:700; }
-  .dot { width:7px; height:7px; background:var(--dim); flex:none; box-shadow:0 0 5px currentColor; }
-  .dot.ok { background:var(--ok); color:var(--ok); }
-  .dot.warn { background:var(--warn); color:var(--warn); }
-  .dot.off { background:#2c382c; box-shadow:none; }
-  .dot.person { background:var(--person); color:var(--person); }
+  .chip b { color:var(--ink); font-weight:800; }
+  /* status pixels: filled ink square = on, hollow = off */
+  .dot { width:8px; height:8px; background:var(--ink); flex:none; }
+  .dot.ok { background:var(--ink); }
+  .dot.warn { background:var(--ink); box-shadow:inset 0 0 0 2px var(--panel2); }
+  .dot.off { background:transparent; box-shadow:inset 0 0 0 1px var(--line); }
+  .dot.person { background:var(--ink); clip-path:polygon(50% 0,100% 100%,0 100%); }
   .spacer { flex:1 1 auto; }
   .tabs { display:flex; gap:5px; flex-wrap:wrap; }
-  .tabs button, .btn { background:none; border:1px solid var(--line); color:var(--dim);
+  .tabs button, .btn { background:var(--panel2); border:1px solid var(--ink); color:var(--ink);
     padding:5px 11px; border-radius:0; cursor:pointer; font:inherit; font-size:12px;
     text-transform:uppercase; letter-spacing:.05em; transition:none; }
-  .tabs button:hover, .btn:hover { border-color:var(--accent); color:var(--bg);
-    background:var(--accent); }
-  .btn { color:var(--fg); }
-  .tabs button.active { border-color:var(--accent); color:var(--bg); background:var(--accent);
-    box-shadow:0 0 10px #ffb00055; }
+  .tabs button:hover, .btn:hover { background:var(--ink); color:var(--panel); }
+  .tabs button.active { background:var(--ink); color:var(--panel); }
   /* layers popover */
   .pop-wrap { position:relative; }
   #layers { display:none; position:absolute; right:0; top:34px; width:236px;
-    background:var(--panel); border:1px solid var(--accent); border-radius:0;
-    padding:10px 12px; box-shadow:0 0 0 9999px #000a, 0 0 18px #ffb00033; z-index:8; }
+    background:var(--panel); border:2px solid var(--ink); border-radius:0;
+    padding:10px 12px; box-shadow:4px 4px 0 #2b2e2055; z-index:8; }
   #layers.open { display:block; }
   #layers .grp { font-size:10px; text-transform:uppercase; letter-spacing:.12em;
-    color:var(--accent); margin:10px 0 4px; border-bottom:1px solid var(--line); }
+    color:var(--ink); font-weight:800; margin:10px 0 4px; border-bottom:1px solid var(--line); }
   #layers .grp:first-child { margin-top:0; }
-  #layers .grp::before { content:"// "; }
+  #layers .grp::before { content:"\2022 "; }
   #layers label { display:flex; align-items:center; gap:7px; padding:3px 0;
     font-size:12px; cursor:pointer; user-select:none; }
-  #layers input { accent-color:var(--accent); }
+  #layers input { accent-color:var(--ink); }
   main { display:flex; gap:12px; padding:12px; flex-wrap:wrap; align-items:flex-start; }
-  #view-wrap { position:relative; flex:1 1 640px; min-width:460px; background:#040504;
-    border-radius:0; overflow:hidden; aspect-ratio:4/3; border:1px solid var(--line); }
+  #view-wrap { position:relative; flex:1 1 640px; min-width:460px; background:var(--panel2);
+    border-radius:0; overflow:hidden; aspect-ratio:4/3; border:2px solid var(--ink); }
   /* contain (true aspect, letterboxed): the camera-overlay canvas maps
      normalized coords into the displayed image rectangle (see letterbox()),
      so annotations register to the frame regardless of camera aspect */
   #stream, #depth-overlay { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; }
-  #depth-overlay { display:none; opacity:.7; mix-blend-mode:screen; }
+  #depth-overlay { display:none; opacity:.7; mix-blend-mode:multiply; }
   #canvas { position:absolute; inset:0; width:100%; height:100%; }
   #splat-wrap { display:none; position:absolute; inset:0; }
-  #view-hint { position:absolute; left:10px; bottom:8px; font-size:11px; color:var(--accent2);
-    background:#000c; padding:3px 8px; border:1px solid var(--line); pointer-events:none;
+  #view-hint { position:absolute; left:10px; bottom:8px; font-size:11px; color:var(--ink);
+    background:var(--panel); padding:3px 8px; border:1px solid var(--ink); pointer-events:none;
     text-transform:uppercase; letter-spacing:.05em; }
   #view-hint::before { content:"> "; }
   aside { flex:0 0 320px; display:flex; flex-direction:column; gap:12px; min-width:280px; }
-  .card { background:var(--panel); border:1px solid var(--line); border-radius:0; padding:12px 13px; }
+  .card { background:var(--panel); border:2px solid var(--ink); border-radius:0; padding:12px 13px; }
   .card h2 { margin:0 0 9px; font-size:11px; text-transform:uppercase; letter-spacing:.12em;
-    color:var(--accent); display:flex; justify-content:space-between; align-items:center;
+    color:var(--ink); font-weight:800; display:flex; justify-content:space-between; align-items:center;
     border-bottom:1px solid var(--line); padding-bottom:6px; }
-  .card h2::before { content:"["; color:var(--dim); margin-right:5px; }
-  .card h2 { position:relative; }
-  .card h2 .count { color:var(--bg); background:var(--accent); border:none; border-radius:0;
-    padding:0 7px; font-size:11px; letter-spacing:.05em; font-weight:700; }
-  #item-search { width:100%; margin-bottom:8px; background:var(--panel2); color:var(--fg);
-    border:1px solid var(--line); border-radius:0; padding:6px 9px; font:inherit; font-size:12px; }
-  #item-search:focus { outline:none; border-color:var(--accent); }
+  .card h2::before { content:"\25AA "; color:var(--ink); margin-right:5px; }
+  .card h2 .count { color:var(--panel); background:var(--ink); border:none; border-radius:0;
+    padding:0 7px; font-size:11px; letter-spacing:.05em; font-weight:800; }
+  #item-search { width:100%; margin-bottom:8px; background:var(--panel2); color:var(--ink);
+    border:1px solid var(--ink); border-radius:0; padding:6px 9px; font:inherit; font-size:12px; }
+  #item-search:focus { outline:none; box-shadow:inset 2px 2px 0 #2b2e2033; }
+  #item-search::placeholder { color:var(--dim); }
   .row { display:flex; align-items:center; gap:9px; padding:6px 0; border-bottom:1px solid var(--line); }
   .row:last-child { border:none; }
-  .row .name { font-weight:700; }
+  .row .name { font-weight:800; }
   .row .meta { margin-left:auto; text-align:right; font-size:11px; color:var(--dim); }
-  .zone-name { color:var(--accent2); text-transform:uppercase; }
-  .badge { font-size:10px; padding:1px 6px; border-radius:0; border:1px solid;
-    margin-left:6px; vertical-align:middle; text-transform:uppercase; letter-spacing:.05em; }
-  .badge.carry { color:var(--person); border-color:var(--person); }
-  .badge.stow  { color:var(--warn); border-color:var(--warn); }
-  .badge.stale { color:var(--warn); border-color:var(--warn); }
-  .stale { color:var(--warn); } .never { color:var(--dim); }
+  .zone-name { color:var(--ink); text-transform:uppercase; font-weight:800; }
+  .badge { font-size:10px; padding:1px 6px; border-radius:0; border:1px solid var(--ink);
+    margin-left:6px; vertical-align:middle; text-transform:uppercase; letter-spacing:.05em;
+    background:var(--ink); color:var(--panel); }
+  .badge.carry, .badge.stow, .badge.stale { background:var(--ink); color:var(--panel); border-color:var(--ink); }
+  .stale { color:var(--dim); } .never { color:var(--dim); }
   .ev { color:var(--dim); font-size:11px; padding:3px 0; border-bottom:1px solid var(--line); }
-  .ev::before { content:"$ "; color:var(--accent); }
+  .ev::before { content:"\25B8 "; color:var(--ink); }
   .ev:last-child { border:none; }
-  .ev b { color:var(--fg); font-weight:700; }
+  .ev b { color:var(--ink); font-weight:800; }
   .muted { color:var(--dim); font-size:11px; }
-  a.action { display:inline-block; color:var(--accent); text-decoration:none; font-size:12px;
-    text-transform:uppercase; letter-spacing:.05em; }
-  a.action:hover { color:var(--accent2); }
+  a.action { display:inline-block; color:var(--ink); text-decoration:none; font-size:12px;
+    text-transform:uppercase; letter-spacing:.05em; font-weight:800; }
+  a.action:hover { text-decoration:underline; }
   /* settings modal */
-  #settings { display:none; position:fixed; inset:0; background:#000c;
+  #settings { display:none; position:fixed; inset:0; background:#2b2e2099;
     z-index:20; align-items:center; justify-content:center; }
-  #settings-card { width:520px; max-height:84vh; overflow:auto; border-color:var(--accent);
-    box-shadow:0 0 24px #ffb00033; }
-  #settings input, #settings select { background:var(--panel2); color:var(--fg);
-    border:1px solid var(--line); border-radius:0; padding:4px 7px; width:72px; font:inherit; font-size:12px; }
-  #settings input:focus, #settings select:focus { outline:none; border-color:var(--accent); }
+  #settings-card { width:520px; max-height:84vh; overflow:auto; box-shadow:6px 6px 0 #2b2e2066; }
+  #settings input, #settings select { background:var(--panel2); color:var(--ink);
+    border:1px solid var(--ink); border-radius:0; padding:4px 7px; width:72px; font:inherit; font-size:12px; }
+  #settings input:focus, #settings select:focus { outline:none; box-shadow:inset 2px 2px 0 #2b2e2033; }
   #settings .btn { margin:0; }
   .cam-cfg { padding:10px 0; border-bottom:1px solid var(--line); }
   .cam-cfg .now { color:var(--dim); font-size:11px; margin:3px 0 7px; }
@@ -120,7 +116,7 @@
     text-transform:uppercase; letter-spacing:.05em; color:var(--dim); }
   .sysrow { display:flex; gap:8px; margin:8px 0; flex-wrap:wrap; }
   #sys-shutdown { border-color:var(--danger); color:var(--danger); }
-  #sys-shutdown:hover { background:var(--danger); color:var(--bg); }
+  #sys-shutdown:hover { background:var(--danger); color:var(--panel); }
 </style>
 </head>
 <body>
@@ -199,7 +195,7 @@ const LAYER_GROUPS = {
 };
 const LAYERS = Object.values(LAYER_GROUPS).flat();
 const LAYER_DEFAULT = { depth: false };  // depth needs the model loaded
-const ITEM_COLORS = ["#ffb000", "#46e3ff", "#5ef08a", "#ff4fa3", "#c9a0ff", "#ffd23f"];
+const ITEM_COLORS = ["#2b2e20", "#5a2f24", "#324a32", "#3a3560", "#5e4a1e", "#27424a"];
 const state = { view: "map", cameras: [], data: null, toggles: {}, splat: false,
                 splatVersion: null, filter: "" };
 for (const [k] of LAYERS)
@@ -288,8 +284,8 @@ function buildTabs() {
 }
 
 function heatColor(v, alphaScale = 0.55) {
-  const hue = 240 - 240 * v; // blue -> red
-  return `hsla(${hue},90%,55%,${(0.15 + 0.85 * v) * alphaScale})`;
+  // monochrome ink density (dot-matrix LCD has no colour)
+  return `rgba(43,46,32,${(0.12 + 0.88 * v) * alphaScale})`;
 }
 
 function worldBounds(zones) {
@@ -336,9 +332,9 @@ function renderMap(d) {
 
   if (on("zones")) for (const z of d.zones) {
     const [x0, y0] = T(z.min), [x1, y1] = T(z.max);
-    ctx.strokeStyle = "#39414e"; ctx.lineWidth = 1;
+    ctx.strokeStyle = "#6b6f53"; ctx.lineWidth = 1;
     ctx.strokeRect(x0, y1, x1 - x0, y0 - y1);
-    ctx.fillStyle = "#566073"; ctx.font = "11px system-ui";
+    ctx.fillStyle = "#5e6248"; ctx.font = "11px system-ui";
     ctx.fillText(z.name, x0 + 4, y0 - 4);
   }
 
@@ -355,13 +351,13 @@ function renderMap(d) {
       }
     for (const id in (h.nodes || {})) {
       const [px, py] = T(h.nodes[id]);
-      ctx.fillStyle = "#8a7dff"; ctx.fillRect(px - 2, py - 2, 4, 4);
+      ctx.fillStyle = "#2b2e20"; ctx.fillRect(px - 2, py - 2, 4, 4);
     }
   }
 
   if (on("rings")) for (const r of d.rings) {
     const [cx, cy] = T([r.cx, r.cy]);
-    ctx.strokeStyle = "rgba(102,217,140,0.45)"; ctx.lineWidth = 1.5;
+    ctx.strokeStyle = "rgba(43,46,32,0.45)"; ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.arc(cx, cy, r.radius * scale, 0, 7); ctx.stroke();
     const [ax, ay] = T(r.anchor);
     ctx.fillStyle = "#66d98c"; ctx.fillRect(ax - 3, ay - 3, 6, 6);
@@ -371,7 +367,7 @@ function renderMap(d) {
     const [ox, oy] = T(b.origin);
     const [ex, ey] = T([b.origin[0] + b.direction[0] * b.length_m,
                         b.origin[1] + b.direction[1] * b.length_m]);
-    ctx.strokeStyle = "rgba(201,162,39,0.6)"; ctx.lineWidth = 1.5;
+    ctx.strokeStyle = "rgba(43,46,32,0.6)"; ctx.lineWidth = 1.5;
     ctx.setLineDash([6, 4]);
     ctx.beginPath(); ctx.moveTo(ox, oy); ctx.lineTo(ex, ey); ctx.stroke();
     ctx.setLineDash([]);
@@ -392,38 +388,38 @@ function renderMap(d) {
 
   if (on("presence") && d.presence) {
     const [px, py] = T(d.presence.centroid);
-    ctx.fillStyle = "rgba(138,125,255,0.25)";
+    ctx.fillStyle = "rgba(43,46,32,0.25)";
     ctx.beginPath(); ctx.arc(px, py, d.presence.sigma_m * scale, 0, 7); ctx.fill();
-    ctx.fillStyle = "#8a7dff"; ctx.fillText("presence", px + 6, py);
+    ctx.fillStyle = "#2b2e20"; ctx.fillText("presence", px + 6, py);
   }
 
   if (on("people")) for (const p of (d.people || [])) {
     const pts = (p.trail || []).map(q => T(q));
     for (let i = 1; i < pts.length; i++) {
-      ctx.strokeStyle = "#ff4fa3";
+      ctx.strokeStyle = "#5a2f24";
       ctx.globalAlpha = 0.1 + 0.5 * (i / pts.length); ctx.lineWidth = 2;
       ctx.beginPath(); ctx.moveTo(pts[i - 1][0], pts[i - 1][1]);
       ctx.lineTo(pts[i][0], pts[i][1]); ctx.stroke();
     }
     ctx.globalAlpha = 1;
     const [px, py] = T(p.position);
-    ctx.fillStyle = "#ff4fa3";
+    ctx.fillStyle = "#5a2f24";
     ctx.beginPath(); ctx.arc(px, py, 6, 0, 7); ctx.fill();
     // velocity arrow
     const [ex, ey] = T([p.position[0] + p.velocity[0], p.position[1] + p.velocity[1]]);
-    ctx.strokeStyle = "#ff4fa3"; ctx.lineWidth = 2;
+    ctx.strokeStyle = "#5a2f24"; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(ex, ey); ctx.stroke();
-    ctx.fillStyle = "#ff9ed0"; ctx.fillText(p.id, px + 8, py - 6);
+    ctx.fillStyle = "#5a2f24"; ctx.fillText(p.id, px + 8, py - 6);
   }
 
   if (on("movables")) for (const m of (d.movables || [])) {
     const pts = m.path.map(p => T(p));
-    ctx.strokeStyle = "#39414e"; ctx.lineWidth = 2;
+    ctx.strokeStyle = "#6b6f53"; ctx.lineWidth = 2;
     ctx.beginPath();
     pts.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]));
     ctx.stroke();
     const [tx, ty] = T(m.tag_pos);
-    ctx.fillStyle = m.is_open ? "#9dff00" : "#566073";
+    ctx.fillStyle = m.is_open ? "#2b2e20" : "#5e6248";
     ctx.beginPath(); ctx.arc(tx, ty, 4, 0, 7); ctx.fill();
     ctx.fillStyle = "#7d8696"; ctx.font = "10px system-ui";
     ctx.fillText(`${m.name} ${m.is_open ? "OPEN" : "closed"}`, tx + 7, ty + 4);
@@ -451,19 +447,19 @@ function renderMap(d) {
 
   if (on("spots")) for (const s of (d.spots || [])) {
     const [px, py] = T(s.position);
-    ctx.strokeStyle = "rgba(157,255,0,0.5)"; ctx.lineWidth = 1;
+    ctx.strokeStyle = "rgba(43,46,32,0.5)"; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.arc(px, py, Math.max(s.radius * scale, 3), 0, 7); ctx.stroke();
     ctx.save(); ctx.translate(px, py); ctx.rotate(Math.PI / 4);
-    ctx.fillStyle = "#9dff00"; ctx.fillRect(-3, -3, 6, 6); ctx.restore();
-    ctx.fillStyle = "#7da356"; ctx.font = "10px system-ui";
+    ctx.fillStyle = "#2b2e20"; ctx.fillRect(-3, -3, 6, 6); ctx.restore();
+    ctx.fillStyle = "#5e6248"; ctx.font = "10px system-ui";
     ctx.fillText(s.name, px + 7, py - 5);
   }
 
   if (on("anchors")) for (const a of (d.anchors || [])) {
     const [px, py] = T(a.position);
-    ctx.fillStyle = "#e8e8e8"; ctx.fillRect(px - 5, py - 5, 10, 10);
-    ctx.fillStyle = "#14171c"; ctx.fillRect(px - 3, py - 3, 3, 3); ctx.fillRect(px, py, 3, 3);
-    ctx.fillStyle = "#9aa3b2"; ctx.font = "10px system-ui";
+    ctx.fillStyle = "#2b2e20"; ctx.fillRect(px - 5, py - 5, 10, 10);
+    ctx.fillStyle = "#cdd0ab"; ctx.fillRect(px - 3, py - 3, 3, 3); ctx.fillRect(px, py, 3, 3);
+    ctx.fillStyle = "#5e6248"; ctx.font = "10px system-ui";
     ctx.fillText(a.tag, px + 8, py + 4);
   }
 
@@ -472,7 +468,7 @@ function renderMap(d) {
     ctx.save(); ctx.translate(px, py); ctx.rotate(-c.yaw_deg * Math.PI / 180);
     // unhealthy calibration (drifted camera) renders red
     const cal = c.calibration;
-    ctx.fillStyle = cal && cal.healthy === false ? "#e05c5c" : "#c9a227";
+    ctx.fillStyle = cal && cal.healthy === false ? "#5a2f24" : "#2b2e20";
     ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(14, -6); ctx.lineTo(14, 6); ctx.closePath(); ctx.fill();
     ctx.restore();
   }
@@ -481,7 +477,7 @@ function renderMap(d) {
     if (!it.position) continue;
     const [px, py] = T(it.position);
     const stale = it.status === "stale";
-    ctx.strokeStyle = stale ? "rgba(224,162,60,0.5)" : "rgba(78,161,255,0.6)";
+    ctx.strokeStyle = stale ? "rgba(43,46,32,0.5)" : "rgba(43,46,32,0.6)";
     ctx.beginPath(); ctx.arc(px, py, Math.max(it.sigma_m * scale, 4), 0, 7); ctx.stroke();
     ctx.fillStyle = stale ? "#e0a23c" : itemColor(d, it.item_id);
     ctx.beginPath(); ctx.arc(px, py, 4, 0, 7); ctx.fill();
@@ -511,25 +507,25 @@ function renderCamera(d) {
     ctx.closePath(); ctx.fill();
   }
 
-  if (on("zones")) for (const z of d.zones) drawSeg(z.points, "#39414e", 1, P);
-  if (on("rings")) for (const r of d.rings) drawSeg(r.points, "rgba(102,217,140,0.55)", 1.5, P);
+  if (on("zones")) for (const z of d.zones) drawSeg(z.points, "#6b6f53", 1, P);
+  if (on("rings")) for (const r of d.rings) drawSeg(r.points, "rgba(43,46,32,0.55)", 1.5, P);
   if (on("trails")) for (const tr of (d.trails || []))
-    drawSeg(tr.points, "rgba(255,126,182,0.6)", 2, P);
+    drawSeg(tr.points, "rgba(43,46,32,0.6)", 2, P);
 
   if (on("presence") && d.presence) {
     const [x, y] = P([d.presence.u, d.presence.v]);
-    ctx.fillStyle = "rgba(138,125,255,0.3)";
+    ctx.fillStyle = "rgba(43,46,32,0.3)";
     ctx.beginPath(); ctx.arc(x, y, 30, 0, 7); ctx.fill();
-    ctx.fillStyle = "#8a7dff"; ctx.fillText("presence", x + 8, y);
+    ctx.fillStyle = "#2b2e20"; ctx.fillText("presence", x + 8, y);
   }
 
   if (on("people")) for (const p of (d.people || [])) {
-    for (const seg of (p.trail || [])) drawSeg(seg, "rgba(255,92,138,0.6)", 2, P);
+    for (const seg of (p.trail || [])) drawSeg(seg, "rgba(43,46,32,0.6)", 2, P);
     if (p.u === undefined || p.u < 0 || p.u > 1 || p.v < 0 || p.v > 1) continue;
     const [x, y] = P([p.u, p.v]);
-    ctx.strokeStyle = "#ff4fa3"; ctx.lineWidth = 2;
+    ctx.strokeStyle = "#5a2f24"; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.arc(x, y, 26, 0, 7); ctx.stroke();
-    ctx.fillStyle = "#ff9ed0"; ctx.font = "13px system-ui";
+    ctx.fillStyle = "#5a2f24"; ctx.font = "13px system-ui";
     ctx.fillText(p.id, x + 10, y - 8);
   }
 
@@ -537,7 +533,7 @@ function renderCamera(d) {
     if (it.u < 0 || it.u > 1 || it.v < 0 || it.v > 1) continue;
     const [x, y] = P([it.u, it.v]);
     const stale = it.status === "stale";
-    ctx.strokeStyle = stale ? "rgba(224,162,60,0.6)" : "rgba(78,161,255,0.7)";
+    ctx.strokeStyle = stale ? "rgba(43,46,32,0.6)" : "rgba(43,46,32,0.7)";
     ctx.lineWidth = 2;
     ctx.beginPath(); ctx.arc(x, y, Math.max(it.sigma_u * w, 6), 0, 7); ctx.stroke();
     ctx.fillStyle = stale ? "#e0a23c" : "#4ea1ff";
@@ -784,7 +780,7 @@ function update3D(d) {
       new THREE.MeshBasicMaterial({ color: 0x9dff00 }));
     oct.position.set(...s.position);
     group.add(oct);
-    const label = makeLabel(THREE, s.name, "#7da356");
+    const label = makeLabel(THREE, s.name, "#5e6248");
     label.position.set(s.position[0], s.position[1], s.position[2] + 0.15);
     group.add(label);
   }
@@ -795,7 +791,7 @@ function update3D(d) {
       new THREE.MeshBasicMaterial({ color: 0xe8e8e8 }));
     cube.position.set(...a.position);
     group.add(cube);
-    const label = makeLabel(THREE, a.tag, "#9aa3b2");
+    const label = makeLabel(THREE, a.tag, "#5e6248");
     label.position.set(a.position[0], a.position[1], a.position[2] + 0.18);
     group.add(label);
   }
