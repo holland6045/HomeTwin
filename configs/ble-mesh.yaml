@@ -1,0 +1,39 @@
+# BLE 5.1 asset tags tracked by multi-anchor triangulation.
+#
+# Three anchors is the minimum for a real fix; four or more lets the solver
+# reject a blocked (NLOS) anchor instead of being dragged by it. Anchors are
+# ESP32 nodes running a BLE scan and forwarding to the network bridge, or the
+# host adapter itself for a single-anchor demo.
+world:
+  zones:
+    - {name: living_room, min: [0, 0, 0], max: [5, 4, 3]}
+
+items:
+  - id: keys
+    name: House keys
+    tags: ["ble:AA:BB:CC:DD:EE:01"]      # or ble:<uuid>:<major>:<minor> for iBeacon
+  - id: wallet
+    name: Wallet
+    tags: ["ble:AA:BB:CC:DD:EE:02"]
+
+sensors:
+  - type: ble_mesh
+    id: ble-mesh
+    anchors:
+      a1: [0.0, 0.0, 2.4]
+      a2: [5.0, 0.0, 2.4]
+      a3: [5.0, 4.0, 2.4]
+      a4: [0.0, 4.0, 2.4]
+      # an AoA-capable locator also declares which way it faces:
+      # a5: {position: [2.5, 4.0, 2.2], yaw_deg: 270}
+    # Tags parked at surveyed spots. These are never tracked as items — they
+    # continuously fit tx_power and the path-loss exponent for this room, which
+    # is the single biggest accuracy win available to RSSI ranging.
+    reference_tags:
+      "ble:AA:BB:CC:DD:EE:F1": [0.5, 0.5, 1.0]
+      "ble:AA:BB:CC:DD:EE:F2": [4.5, 3.5, 1.0]
+      "ble:AA:BB:CC:DD:EE:F3": [2.5, 2.0, 0.4]
+    min_anchors: 3        # below this it emits ranges and lets the filter cope
+    window_s: 4.0         # anchors must agree within this window to be combined
+    tx_power: -59.0       # starting guess, replaced once reference tags fit
+    exponent: 2.7
